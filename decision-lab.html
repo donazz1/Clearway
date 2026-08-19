@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Big Decision">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<title>The Big Decision — Clearway</title>
+<style>
+  :root{
+    --paper:#F6F4EE; --paper-raised:#FFFFFF; --ink:#20281F; --ink-soft:#5C6459;
+    --line:#DDD8C8; --good:#3E6B54; --good-soft:#E4EEE7; --warn:#B4842A; --warn-soft:#F6EBD8;
+    --bad:#B3473A; --bad-soft:#F5E4E1; --accent:#5C7A68; --focus:#2F6E52;
+    --electric:#3A5F86; --electric-soft:#E4EBF2;
+    --serif:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+    --mono:'SF Mono',ui-monospace,'Menlo',Consolas,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased;padding-bottom:40px;}
+  .wrap{max-width:760px;margin:0 auto;padding:24px 20px 40px;}
+  a.back{font-size:13px;color:var(--ink-soft);text-decoration:none;display:inline-block;margin-bottom:14px;}
+  a.back:hover{color:var(--ink);}
+  .brand{font-family:var(--serif);font-size:26px;font-weight:600;letter-spacing:-.01em;margin-bottom:2px;}
+  .brand small{display:block;font-family:var(--sans);font-size:12px;font-weight:500;color:var(--ink-soft);letter-spacing:.06em;text-transform:uppercase;margin-top:4px;}
+
+  .section{background:var(--paper-raised);border:1px solid var(--line);border-radius:16px;margin:16px 0;padding:20px;}
+  .section h2{font-family:var(--serif);font-size:18px;margin:0 0 4px;font-weight:600;}
+  .section .desc{font-size:13px;color:var(--ink-soft);margin-bottom:16px;line-height:1.5;}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+  @media(max-width:600px){.grid2{grid-template-columns:1fr;}}
+  .col-head{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:10px;}
+  .col-head.ev{color:var(--electric);}
+
+  .field{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);}
+  .field:last-child{border-bottom:none;}
+  .field label{font-size:13px;color:var(--ink);flex:1;}
+  .field input[type=number]{width:100px;border:none;background:var(--paper);font-family:var(--mono);font-size:13px;text-align:right;padding:6px 8px;border-radius:6px;}
+  .field input[type=number]:focus{outline:1px solid var(--focus);}
+  .field .unit{font-size:11px;color:var(--ink-soft);width:44px;}
+
+  .delta-banner{
+    margin-top:16px;padding:16px 18px;border-radius:12px;background:var(--paper);
+    display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;
+  }
+  .delta-banner .lbl{font-size:13px;color:var(--ink-soft);}
+  .delta-banner .val{font-family:var(--serif);font-size:26px;font-weight:600;}
+  .delta-banner .val.good{color:var(--good);} .delta-banner .val.bad{color:var(--bad);} .delta-banner .val.warn{color:var(--warn);}
+
+  /* Scorecard */
+  .factor{padding:14px 0;border-bottom:1px solid var(--line);}
+  .factor:last-child{border-bottom:none;}
+  .factor-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;}
+  .factor-top .fname{font-size:14px;font-weight:600;}
+  .factor-top .fweight{font-size:11px;color:var(--ink-soft);}
+  .factor-row{display:flex;align-items:center;gap:14px;}
+  .factor-row .side{font-size:11px;color:var(--ink-soft);width:56px;text-align:center;}
+  .slider-wrap{flex:1;}
+  input[type=range]{width:100%;accent-color:var(--accent);}
+  .weight-input{width:50px;border:none;background:var(--paper);font-family:var(--mono);font-size:12px;text-align:center;padding:4px;border-radius:5px;}
+
+  .verdict{
+    margin-top:18px;padding:22px;border-radius:14px;text-align:center;
+  }
+  .verdict.go{background:var(--good-soft);}
+  .verdict.wait{background:var(--warn-soft);}
+  .verdict.no{background:var(--bad-soft);}
+  .verdict .word{font-family:var(--serif);font-size:32px;font-weight:700;margin-bottom:6px;}
+  .verdict.go .word{color:var(--good);} .verdict.wait .word{color:var(--warn);} .verdict.no .word{color:var(--bad);}
+  .verdict .why{font-size:13px;color:var(--ink-soft);max-width:480px;margin:0 auto;line-height:1.6;}
+
+  /* Rideshare module */
+  .toggle-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;}
+  .switch{position:relative;width:42px;height:24px;flex-shrink:0;}
+  .switch input{opacity:0;width:0;height:0;}
+  .slider-toggle{position:absolute;cursor:pointer;inset:0;background:var(--line);border-radius:24px;transition:.15s;}
+  .slider-toggle:before{content:"";position:absolute;height:18px;width:18px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.15s;}
+  input:checked + .slider-toggle{background:var(--electric);}
+  input:checked + .slider-toggle:before{transform:translateX(18px);}
+
+  .disclaimer{
+    font-size:12px;color:var(--ink-soft);background:var(--electric-soft);border:1px dashed var(--electric);
+    padding:10px 12px;border-radius:10px;margin:12px 0;line-height:1.5;
+  }
+  .rideshare-body{display:none;margin-top:14px;}
+  .rideshare-body.show{display:block;}
+
+  .presets{display:flex;gap:8px;margin-bottom:14px;}
+  .presets button{
+    flex:1;padding:9px;border-radius:9px;border:1px solid var(--line);background:var(--paper);
+    font-size:12px;font-weight:600;color:var(--ink-soft);cursor:pointer;
+  }
+  .presets button.active{background:var(--electric);border-color:var(--electric);color:#fff;}
+
+  .rs-out{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:14px;}
+  @media(max-width:600px){.rs-out{grid-template-columns:1fr;}}
+  .rs-card{background:var(--paper);border-radius:10px;padding:12px;text-align:center;}
+  .rs-card .k{font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em;}
+  .rs-card .v{font-family:var(--serif);font-size:20px;font-weight:600;margin-top:4px;}
+
+  .assumptions{margin-top:16px;padding-top:14px;border-top:1px solid var(--line);}
+  .assumptions summary{font-size:12px;color:var(--ink-soft);cursor:pointer;font-weight:600;}
+
+  @media print{
+    body{padding-bottom:0;} a.back{display:none;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="index.html">‹ Back to budget</a>
+  <div class="brand">The Big Decision<small>vehicle swap, modeled honestly — not just the dollars</small></div>
+
+  <!-- CURRENT VS NEW -->
+  <div class="section">
+    <h2>What it costs you each month</h2>
+    <div class="desc">Fill in your current vehicle and the one you're considering. This is the money side only — the rest comes below.</div>
+    <div class="grid2">
+      <div>
+        <div class="col-head" id="curLabel">Current vehicle</div>
+        <div id="curFields"></div>
+      </div>
+      <div>
+        <div class="col-head ev" id="newLabel">New vehicle</div>
+        <div id="newFields"></div>
+      </div>
+    </div>
+    <div class="delta-banner">
+      <div>
+        <div class="lbl">Monthly cost, new vs. current</div>
+        <div class="val" id="deltaVal">$0</div>
+      </div>
+      <div style="font-size:12px;color:var(--ink-soft);max-width:260px;">
+        Includes financing on the new vehicle after putting your current vehicle's sale value toward it.
+      </div>
+    </div>
+  </div>
+
+  <!-- SCORECARD -->
+  <div class="section">
+    <h2>Beyond the dollars</h2>
+    <div class="desc">Slide toward whichever vehicle wins on each factor. Adjust the weight if one matters more to you than another.</div>
+    <div id="factors"></div>
+  </div>
+
+  <!-- RIDESHARE MODULE -->
+  <div class="section">
+    <div class="toggle-row">
+      <h2 style="margin:0;">Rideshare / robotaxi income</h2>
+      <label class="switch">
+        <input type="checkbox" id="rsToggle">
+        <span class="slider-toggle"></span>
+      </label>
+    </div>
+    <div class="desc">If part of the reason to switch is future network income, model it here — separately from the core decision above.</div>
+
+    <div class="rideshare-body" id="rsBody">
+      <div class="disclaimer">
+        Nothing here is confirmed by Tesla. There's no live driver-operated or passive-robotaxi program in Canada. Two different scenarios are modeled below — pick the one that matches what Dave's actually picturing.
+      </div>
+
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:14px;font-size:13px;font-weight:600;">
+        <input type="checkbox" id="passiveMode"> Passive mode — the car earns on its own; I'm not the one driving it
+      </label>
+
+      <div id="activeBlock">
+        <div class="presets">
+          <button data-p="conservative">Conservative</button>
+          <button data-p="moderate" class="active">Moderate</button>
+          <button data-p="optimistic">Optimistic</button>
+        </div>
+        <div id="rsFields"></div>
+        <details class="assumptions">
+          <summary>How this is calculated</summary>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:8px;line-height:1.7;">
+            Gross fares = hours/week × fares/hour × avg fare. Driver share = gross fares × your revenue split %. Operating cost = hours/week × avg speed (km/h) × cost per km. Net = driver share − operating cost. This is a from-scratch estimate — there's no real driver-operated Tesla network to benchmark against, so treat every input as a guess you can adjust.
+          </div>
+        </details>
+      </div>
+
+      <div id="passiveBlock" style="display:none;">
+        <div class="disclaimer" style="background:var(--good-soft);border-color:var(--good);">
+          Grounded in Cern Basher's (@CernBasher on X) published Cybercab/Robotaxi modeling: a $3 base + $1/mile fare, a baseline 35% vehicle utilization (8.4 hrs/day in service), and Tesla take rates ranging 15–50%. He calls a 35% take rate — Tesla 35%, owner 65% — "a pretty good mix."
+        </div>
+        <div class="presets">
+          <button data-p2="tesla_favored">Tesla takes more (50%)</button>
+          <button data-p2="balanced" class="active">Balanced (35%)</button>
+          <button data-p2="owner_favored">Owner takes more (15%)</button>
+        </div>
+        <div id="passiveFields"></div>
+      </div>
+
+      <div class="rs-out">
+        <div class="rs-card"><div class="k">Weekly net</div><div class="v" id="rsWeekly">$0</div></div>
+        <div class="rs-card"><div class="k">Monthly net</div><div class="v" id="rsMonthly">$0</div></div>
+        <div class="rs-card"><div class="k">Covers car payment?</div><div class="v" id="rsCovers">—</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VERDICT -->
+  <div class="section">
+    <h2>So — go or no-go?</h2>
+    <div class="verdict" id="verdict">
+      <div class="word" id="verdictWord">—</div>
+      <div class="why" id="verdictWhy">Fill in the numbers and factors above.</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ---------- State ---------- */
+const STORAGE_KEY = 'clearway-decision-lab-v1';
+
+function defaultState(){
+  return {
+    curLabel: 'Current car',
+    newLabel: 'New car',
+    current: { fuel:'', insurance:'', maintenance:'', financing:'', parking:'' , saleValue:'' },
+    newv: { price:'', downFromSale:'', loanRate:'6.5', loanTermMonths:'60', insurance:'', electricity:'', maintenance:'', extraFinance:'' },
+    factors: [
+      {name:'Reliability / breakdown risk', weight:3, val:0},
+      {name:'Convenience (charging vs. fueling, daily use)', weight:3, val:0},
+      {name:'Joy & driving experience', weight:2, val:0},
+      {name:'Functionality (space, tech, towing, etc.)', weight:2, val:0}
+    ],
+    rideshare: {
+      enabled:false,
+      passive:false,
+      preset:'moderate',
+      hoursPerWeek: 20,
+      faresPerHour: 1.5,
+      avgFare: 14,
+      splitPct: 70,
+      costPerMile: 0.12,
+      avgMph: 22,
+      passivePreset: 'balanced',
+      takeRatePct: 35,
+      utilizationPctDay: 35
+    }
+  };
+}
+function load(){
+  try{ const raw = localStorage.getItem(STORAGE_KEY); if(!raw) return defaultState();
+    return Object.assign(defaultState(), JSON.parse(raw));
+  }catch(e){ return defaultState(); }
+}
+let state = load();
+function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+function fmt(n){ const v=Math.round(n||0); const s=v<0?'-':''; return s+'$'+Math.abs(v).toLocaleString(); }
+
+/* ---------- Cost fields ---------- */
+const CUR_FIELDS = [
+  ['fuel','Fuel','/mo'], ['insurance','Insurance','/mo'], ['maintenance','Maintenance (avg)','/mo'],
+  ['financing','Current loan/lease payment','/mo'], ['parking','Parking / tolls','/mo'],
+  ['saleValue','Est. private sale value','one-time']
+];
+const NEW_FIELDS = [
+  ['price','Purchase price','one-time'], ['downFromSale','Extra cash down (beyond sale)','one-time'],
+  ['loanRate','Loan rate','% APR'], ['loanTermMonths','Loan term','months'],
+  ['insurance','Insurance','/mo'], ['electricity','Electricity / fuel','/mo'],
+  ['maintenance','Maintenance (avg)','/mo'], ['extraFinance','Other monthly (charging equip. etc.)','/mo']
+];
+
+function renderFieldGroup(container, fieldsDef, obj){
+  container.innerHTML = '';
+  fieldsDef.forEach(([key,label,unit])=>{
+    const row = document.createElement('div');
+    row.className = 'field';
+    row.innerHTML = `<label>${label}</label><input type="number" step="any" value="${obj[key]||''}"><span class="unit">${unit}</span>`;
+    row.querySelector('input').addEventListener('input', e=>{ obj[key]=e.target.value; save(); compute(); });
+    container.appendChild(row);
+  });
+}
+
+function loanPayment(principal, ratePct, termMonths){
+  const P = parseFloat(principal)||0;
+  const r = (parseFloat(ratePct)||0)/100/12;
+  const n = parseFloat(termMonths)||0;
+  if(P<=0 || n<=0) return 0;
+  if(r===0) return P/n;
+  return P * r / (1 - Math.pow(1+r,-n));
+}
+
+function computeMonthly(){
+  const c = state.current;
+  const curTotal = ['fuel','insurance','maintenance','financing','parking'].reduce((s,k)=>s+(parseFloat(c[k])||0),0);
+
+  const nv = state.newv;
+  const saleValue = parseFloat(c.saleValue)||0;
+  const price = parseFloat(nv.price)||0;
+  const downFromSale = parseFloat(nv.downFromSale)||0;
+  const principal = Math.max(0, price - saleValue - downFromSale);
+  const pmt = loanPayment(principal, nv.loanRate, nv.loanTermMonths);
+  const newTotal = pmt + (parseFloat(nv.insurance)||0) + (parseFloat(nv.electricity)||0) + (parseFloat(nv.maintenance)||0) + (parseFloat(nv.extraFinance)||0);
+
+  return {curTotal, newTotal, delta: newTotal - curTotal, pmt};
+}
+
+/* ---------- Factors ---------- */
+function renderFactors(){
+  const wrap = document.getElementById('factors');
+  wrap.innerHTML = '';
+  state.factors.forEach((f, idx)=>{
+    const el = document.createElement('div');
+    el.className = 'factor';
+    el.innerHTML = `
+      <div class="factor-top">
+        <span class="fname">${f.name}</span>
+        <span class="fweight">weight <input type="number" class="weight-input" min="0" max="5" value="${f.weight}"></span>
+      </div>
+      <div class="factor-row">
+        <span class="side">${state.curLabel||'Current'}</span>
+        <div class="slider-wrap"><input type="range" min="-2" max="2" step="1" value="${f.val}"></div>
+        <span class="side">${state.newLabel||'New'}</span>
+      </div>
+    `;
+    el.querySelector('.weight-input').addEventListener('input', e=>{ f.weight = parseFloat(e.target.value)||0; save(); compute(); });
+    el.querySelector('input[type=range]').addEventListener('input', e=>{ f.val = parseInt(e.target.value); save(); compute(); });
+    wrap.appendChild(el);
+  });
+}
+
+/* ---------- Rideshare ---------- */
+const PRESETS = {
+  conservative: { hoursPerWeek:15, faresPerHour:1.0, avgFare:12, splitPct:65, costPerMile:0.14, avgMph:20 },
+  moderate:     { hoursPerWeek:20, faresPerHour:1.5, avgFare:14, splitPct:70, costPerMile:0.12, avgMph:22 },
+  optimistic:   { hoursPerWeek:28, faresPerHour:2.0, avgFare:16, splitPct:75, costPerMile:0.10, avgMph:24 }
+};
+const RS_FIELDS = [
+  ['hoursPerWeek','Hours per week on the network','hrs'],
+  ['faresPerHour','Fares per hour (avg)','fares'],
+  ['avgFare','Average fare','$'],
+  ['splitPct','Your revenue share','%'],
+  ['costPerMile','Operating cost per km','$/km'],
+  ['avgMph','Average speed while earning','km/h']
+];
+const PASSIVE_FIELDS = [
+  ['takeRatePct',"Tesla's take rate",'%'],
+  ['utilizationPctDay','Vehicle utilization (of each day)','%']
+];
+const PASSIVE_PRESETS = {
+  tesla_favored: { takeRatePct:50 },
+  balanced:      { takeRatePct:35 },
+  owner_favored: { takeRatePct:15 }
+};
+// Net profit per vehicle per YEAR to the owner, at 35% baseline utilization,
+// from Cern Basher's published take-rate sensitivity (15% -> $18,000, 35% -> $10,500, 50% -> $4,900).
+function passiveNetAnnualAtBaseline(takeRate){
+  const pts = [[15,18000],[35,10500],[50,4900]];
+  if(takeRate<=pts[0][0]) return pts[0][1];
+  if(takeRate>=pts[pts.length-1][0]) return pts[pts.length-1][1];
+  for(let i=0;i<pts.length-1;i++){
+    const [x0,y0]=pts[i], [x1,y1]=pts[i+1];
+    if(takeRate>=x0 && takeRate<=x1){
+      const t = (takeRate-x0)/(x1-x0);
+      return y0 + t*(y1-y0);
+    }
+  }
+  return pts[1][1];
+}
+
+function renderRideshareFields(){
+  const rs = state.rideshare;
+  document.getElementById('activeBlock').style.display = rs.passive ? 'none' : 'block';
+  document.getElementById('passiveBlock').style.display = rs.passive ? 'block' : 'none';
+
+  const wrap = document.getElementById('rsFields');
+  wrap.innerHTML = '';
+  RS_FIELDS.forEach(([key,label,unit])=>{
+    const row = document.createElement('div');
+    row.className = 'field';
+    row.innerHTML = `<label>${label}</label><input type="number" step="any" value="${rs[key]}"><span class="unit">${unit}</span>`;
+    row.querySelector('input').addEventListener('input', e=>{
+      rs[key] = e.target.value; save(); compute();
+    });
+    wrap.appendChild(row);
+  });
+
+  const pwrap = document.getElementById('passiveFields');
+  pwrap.innerHTML = '';
+  PASSIVE_FIELDS.forEach(([key,label,unit])=>{
+    const row = document.createElement('div');
+    row.className = 'field';
+    row.innerHTML = `<label>${label}</label><input type="number" step="any" value="${rs[key]}"><span class="unit">${unit}</span>`;
+    row.querySelector('input').addEventListener('input', e=>{
+      rs[key] = e.target.value; save(); compute();
+    });
+    pwrap.appendChild(row);
+  });
+
+  document.getElementById('passiveMode').checked = !!rs.passive;
+}
+
+function computeRideshare(costData){
+  const rs = state.rideshare;
+
+  if(rs.passive){
+    const take = parseFloat(rs.takeRatePct)||0;
+    const util = parseFloat(rs.utilizationPctDay)||0;
+    const baseAnnual = passiveNetAnnualAtBaseline(take);
+    const scaledAnnual = baseAnnual * (util/35); // scale from the 35%-utilization baseline
+    const netMonthly = scaledAnnual/12;
+    return {netWeekly: netMonthly/4.333, netMonthly};
+  }
+
+  const hours = parseFloat(rs.hoursPerWeek)||0;
+  const fph = parseFloat(rs.faresPerHour)||0;
+  const fare = parseFloat(rs.avgFare)||0;
+  const split = (parseFloat(rs.splitPct)||0)/100;
+  const cpm = parseFloat(rs.costPerMile)||0;
+  const mph = parseFloat(rs.avgMph)||0;
+
+  const grossWeekly = hours * fph * fare;
+  const driverShareWeekly = grossWeekly * split;
+  const milesWeekly = hours * mph;
+  const opCostWeekly = milesWeekly * cpm;
+  const netWeekly = driverShareWeekly - opCostWeekly;
+  const netMonthly = netWeekly * 4.333;
+
+  return {netWeekly, netMonthly};
+}
+
+/* ---------- Verdict ---------- */
+function computeVerdict(costData, rsData){
+  const factorScore = state.factors.reduce((s,f)=>s + f.val*f.weight, 0);
+  const maxPossible = state.factors.reduce((s,f)=>s + 2*f.weight, 0) || 1;
+  const normFactor = factorScore / maxPossible; // -1..1, positive favors new
+
+  const rsIncome = (state.rideshare.enabled ? rsData.netMonthly : 0);
+  const effectiveDelta = costData.delta - rsIncome; // lower is better for "new"
+
+  // Normalize financial signal roughly against current spend, capped
+  const denom = Math.max(200, costData.curTotal || 300);
+  const normFinancial = Math.max(-1, Math.min(1, -effectiveDelta / denom));
+
+  const combined = (normFinancial*0.55) + (normFactor*0.45);
+
+  const verdictEl = document.getElementById('verdict');
+  const wordEl = document.getElementById('verdictWord');
+  const whyEl = document.getElementById('verdictWhy');
+
+  let word, cls, why;
+  if(combined > 0.18){
+    word='Go'; cls='go';
+  } else if(combined < -0.18){
+    word='No-go'; cls='no';
+  } else {
+    word='Worth a closer look'; cls='wait';
+  }
+
+  const moneyPhrase = effectiveDelta<=0
+    ? `it comes out ${fmt(Math.abs(effectiveDelta))} cheaper per month than what you're driving now${state.rideshare.enabled?' after rideshare income':''}`
+    : `it costs ${fmt(effectiveDelta)} more per month than what you're driving now${state.rideshare.enabled?' even after rideshare income':''}`;
+
+  const topFactor = state.factors.slice().sort((a,b)=>Math.abs(b.val*b.weight)-Math.abs(a.val*a.weight))[0];
+  const factorPhrase = topFactor && topFactor.val!==0
+    ? `, and ${topFactor.val>0?state.newLabel||'the new car':state.curLabel||'your current car'} pulls ahead most on "${topFactor.name.toLowerCase()}"`
+    : '';
+
+  why = `Financially, ${moneyPhrase}${factorPhrase}.`;
+  verdictEl.className = 'verdict ' + cls;
+  wordEl.textContent = word;
+  whyEl.textContent = why;
+}
+
+/* ---------- Main compute + render ---------- */
+function compute(){
+  const costData = computeMonthly();
+  const deltaEl = document.getElementById('deltaVal');
+  deltaEl.textContent = (costData.delta<=0?'':'+') + fmt(costData.delta) + '/mo';
+  deltaEl.className = 'val ' + (costData.delta<=0?'good':costData.delta<150?'warn':'bad');
+
+  const rsData = computeRideshare(costData);
+  document.getElementById('rsWeekly').textContent = fmt(rsData.netWeekly);
+  document.getElementById('rsMonthly').textContent = fmt(rsData.netMonthly);
+  const covers = rsData.netMonthly >= costData.pmt && costData.pmt>0;
+  document.getElementById('rsCovers').textContent = costData.pmt>0 ? (covers?'Yes':'Not quite') : '—';
+
+  computeVerdict(costData, rsData);
+}
+
+/* ---------- Init ---------- */
+function init(){
+  renderFieldGroup(document.getElementById('curFields'), CUR_FIELDS, state.current);
+  renderFieldGroup(document.getElementById('newFields'), NEW_FIELDS, state.newv);
+  renderFactors();
+  renderRideshareFields();
+
+  document.getElementById('rsToggle').checked = !!state.rideshare.enabled;
+  document.getElementById('rsBody').classList.toggle('show', !!state.rideshare.enabled);
+  document.getElementById('rsToggle').addEventListener('change', e=>{
+    state.rideshare.enabled = e.target.checked;
+    document.getElementById('rsBody').classList.toggle('show', e.target.checked);
+    save(); compute();
+  });
+
+  document.querySelectorAll('#activeBlock .presets button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('#activeBlock .presets button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      const p = PRESETS[btn.dataset.p];
+      Object.assign(state.rideshare, p);
+      state.rideshare.preset = btn.dataset.p;
+      renderRideshareFields();
+      save(); compute();
+    });
+  });
+
+  document.querySelectorAll('#passiveBlock .presets button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('#passiveBlock .presets button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      const p = PASSIVE_PRESETS[btn.dataset.p2];
+      Object.assign(state.rideshare, p);
+      state.rideshare.passivePreset = btn.dataset.p2;
+      renderRideshareFields();
+      save(); compute();
+    });
+  });
+
+  document.getElementById('passiveMode').addEventListener('change', e=>{
+    state.rideshare.passive = e.target.checked;
+    renderRideshareFields();
+    save(); compute();
+  });
+
+  compute();
+}
+init();
+</script>
+</body>
+</html>

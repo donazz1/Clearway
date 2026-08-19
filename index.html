@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Clearway">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<title>Clearway — Money, made clear</title>
+<style>
+  :root{
+    --paper:#F6F4EE;
+    --paper-raised:#FFFFFF;
+    --ink:#20281F;
+    --ink-soft:#5C6459;
+    --line:#DDD8C8;
+    --good:#3E6B54;
+    --good-soft:#E4EEE7;
+    --warn:#B4842A;
+    --warn-soft:#F6EBD8;
+    --bad:#B3473A;
+    --bad-soft:#F5E4E1;
+    --accent:#5C7A68;
+    --focus:#2F6E52;
+    --serif:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+    --mono:'SF Mono',ui-monospace,'Menlo',Consolas,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;
+    padding-bottom:80px;
+  }
+  .wrap{max-width:760px;margin:0 auto;padding:28px 20px 40px;}
+
+  /* Header */
+  header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;}
+  .brand{font-family:var(--serif);font-size:26px;font-weight:600;letter-spacing:-0.01em;}
+  .brand small{display:block;font-family:var(--sans);font-size:12px;font-weight:500;color:var(--ink-soft);letter-spacing:.06em;text-transform:uppercase;margin-top:2px;}
+  .month-nav{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--ink-soft);}
+  .month-nav button{background:none;border:1px solid var(--line);border-radius:7px;width:28px;height:28px;color:var(--ink);cursor:pointer;font-size:14px;}
+  .month-nav button:hover{background:var(--paper-raised);}
+
+  /* Hero */
+  .hero{
+    margin:26px 0 22px;
+    padding:28px 26px;
+    border-radius:18px;
+    background:var(--paper-raised);
+    border:1px solid var(--line);
+    position:relative;
+    overflow:hidden;
+  }
+  .hero .tag{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-soft);font-weight:600;}
+  .hero .num{font-family:var(--serif);font-size:56px;line-height:1.05;margin:8px 0 4px;font-weight:600;}
+  .hero .num.good{color:var(--good);}
+  .hero .num.warn{color:var(--warn);}
+  .hero .num.bad{color:var(--bad);}
+  .hero .sub{font-size:14px;color:var(--ink-soft);}
+  .hero .bar{margin-top:18px;height:8px;border-radius:99px;background:var(--line);overflow:hidden;display:flex;}
+  .hero .bar div{height:100%;}
+  .hero .legend{display:flex;gap:16px;margin-top:10px;font-size:12px;color:var(--ink-soft);}
+  .hero .legend span{display:inline-flex;align-items:center;gap:5px;}
+  .hero .legend i{width:8px;height:8px;border-radius:2px;display:inline-block;}
+
+  .whatif-banner{
+    display:none;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    background:var(--warn-soft);
+    border:1px dashed var(--warn);
+    color:#7A5A17;
+    padding:10px 14px;
+    border-radius:12px;
+    font-size:13px;
+    margin-bottom:16px;
+  }
+  .whatif-banner.show{display:flex;}
+  .whatif-banner button{
+    background:var(--ink);color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:12px;cursor:pointer;
+  }
+  .whatif-banner .discard{background:none;color:#7A5A17;text-decoration:underline;padding:6px 4px;}
+
+  /* Section cards */
+  .section{
+    background:var(--paper-raised);
+    border:1px solid var(--line);
+    border-radius:16px;
+    margin-bottom:16px;
+    overflow:hidden;
+  }
+  .section-head{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:16px 18px;cursor:pointer;user-select:none;
+  }
+  .section-head .left{display:flex;align-items:center;gap:10px;}
+  .section-head .ttl{font-weight:600;font-size:15px;}
+  .section-head .count{font-size:12px;color:var(--ink-soft);}
+  .section-head .total{font-family:var(--mono);font-size:14px;font-weight:600;color:var(--ink);}
+  .section-head .chev{color:var(--ink-soft);transition:transform .15s ease;font-size:12px;}
+  .section.open .chev{transform:rotate(90deg);}
+  .section-body{display:none;padding:0 18px 16px;}
+  .section.open .section-body{display:block;}
+
+  .row{
+    display:grid;
+    grid-template-columns:1fr 100px 110px 30px;
+    gap:8px;
+    align-items:center;
+    padding:7px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .row:last-of-type{border-bottom:none;}
+  .row input[type=text]{
+    border:none;background:transparent;font-size:14px;color:var(--ink);padding:6px 4px;border-radius:6px;
+  }
+  .row input[type=text]:focus{background:var(--paper);outline:1px solid var(--line);}
+  .row input[type=number]{
+    border:none;background:var(--paper);font-family:var(--mono);font-size:13px;text-align:right;padding:6px 8px;border-radius:6px;width:100%;
+  }
+  .row input[type=number]:focus{outline:1px solid var(--focus);}
+  .row select{
+    border:none;background:var(--paper);font-size:12px;color:var(--ink-soft);padding:6px 4px;border-radius:6px;width:100%;
+  }
+  .row .del{
+    background:none;border:none;color:var(--ink-soft);cursor:pointer;font-size:15px;line-height:1;padding:4px;
+  }
+  .row .del:hover{color:var(--bad);}
+
+  .add-row{
+    display:flex;align-items:center;gap:6px;
+    margin-top:8px;padding:8px 4px;
+    background:none;border:1px dashed var(--line);border-radius:9px;
+    color:var(--accent);font-size:13px;font-weight:600;cursor:pointer;width:100%;justify-content:center;
+  }
+  .add-row:hover{background:var(--good-soft);border-color:var(--good);}
+
+  /* Category breakdown */
+  .breakdown{padding:2px 4px 4px;}
+  .bd-row{display:flex;align-items:center;gap:10px;font-size:13px;margin-bottom:8px;}
+  .bd-row .lbl{width:130px;flex-shrink:0;color:var(--ink-soft);}
+  .bd-row .track{flex:1;height:8px;background:var(--paper);border-radius:99px;overflow:hidden;}
+  .bd-row .track div{height:100%;background:var(--accent);border-radius:99px;}
+  .bd-row .amt{width:70px;text-align:right;font-family:var(--mono);flex-shrink:0;}
+
+  /* Notes / goals */
+  textarea{
+    width:100%;min-height:80px;border:1px solid var(--line);border-radius:10px;
+    background:var(--paper);padding:12px;font-family:var(--sans);font-size:13px;color:var(--ink);resize:vertical;
+  }
+  textarea:focus{outline:1px solid var(--focus);}
+
+  /* Footer action bar */
+  .actionbar{
+    position:fixed;left:0;right:0;bottom:0;
+    background:var(--paper-raised);
+    border-top:1px solid var(--line);
+    padding:12px 20px;
+    display:flex;gap:10px;justify-content:center;
+    box-shadow:0 -4px 20px rgba(0,0,0,.04);
+  }
+  .actionbar button{
+    border:1px solid var(--line);background:var(--paper-raised);color:var(--ink);
+    font-size:13px;font-weight:600;padding:10px 16px;border-radius:10px;cursor:pointer;
+  }
+  .actionbar button.primary{background:var(--ink);color:#fff;border-color:var(--ink);}
+  .actionbar button.whatif-active{background:var(--warn);border-color:var(--warn);color:#fff;}
+  .actionbar button:hover{opacity:.85;}
+
+  /* Share/print modal */
+  .modal-bg{
+    display:none;position:fixed;inset:0;background:rgba(20,22,17,.45);z-index:50;
+    align-items:center;justify-content:center;padding:20px;
+  }
+  .modal-bg.show{display:flex;}
+  .modal{
+    background:var(--paper-raised);border-radius:16px;padding:22px;max-width:360px;width:100%;
+  }
+  .modal h3{margin:0 0 4px;font-family:var(--serif);font-size:19px;}
+  .modal p{margin:0 0 14px;font-size:13px;color:var(--ink-soft);}
+  .modal label{display:flex;align-items:center;gap:9px;font-size:14px;padding:7px 0;cursor:pointer;}
+  .modal .modal-actions{display:flex;gap:8px;margin-top:16px;}
+  .modal .modal-actions button{flex:1;padding:10px;border-radius:9px;border:1px solid var(--line);background:var(--paper);font-size:13px;font-weight:600;cursor:pointer;}
+  .modal .modal-actions button.primary{background:var(--ink);color:#fff;border-color:var(--ink);}
+
+  .install-hint{
+    text-align:center;font-size:11px;color:var(--ink-soft);margin-top:20px;line-height:1.6;
+  }
+
+  @media (max-width:480px){
+    .hero .num{font-size:42px;}
+    .row{grid-template-columns:1fr 78px 90px 26px;}
+  }
+
+  /* Print styles */
+  @media print{
+    body{padding-bottom:0;background:#fff;}
+    .actionbar,.month-nav,.add-row,.row .del,.section-head .chev,.install-hint,.modal-bg,.whatif-banner{display:none !important;}
+    .section{border:none;border-bottom:1px solid #ccc;border-radius:0;break-inside:avoid;}
+    .section-body{display:block !important;}
+    .hero{border:none;}
+    .print-hide{display:none !important;}
+    .row select, .row input{background:none !important;}
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header>
+    <div class="brand">Clearway<small>your money, on one page</small></div>
+    <div class="month-nav print-hide">
+      <button id="prevMonth">‹</button>
+      <span id="monthLabel">This month</span>
+      <button id="nextMonth">›</button>
+    </div>
+  </header>
+
+  <div class="whatif-banner" id="whatifBanner">
+    <span>You're exploring a <strong>what if</strong> — nothing is saved yet.</span>
+    <span style="display:flex;gap:8px;">
+      <button class="discard" id="discardWhatif">Discard</button>
+      <button id="keepWhatif">Keep these changes</button>
+    </span>
+  </div>
+
+  <div class="hero">
+    <div class="tag">Left over each month</div>
+    <div class="num" id="heroNum">$0</div>
+    <div class="sub" id="heroSub">Add your income and expenses below to see where you stand.</div>
+    <div class="bar" id="heroBar"></div>
+    <div class="legend">
+      <span><i style="background:var(--good)"></i>Income</span>
+      <span><i style="background:var(--ink-soft)"></i>Spending</span>
+    </div>
+  </div>
+
+  <!-- INCOME -->
+  <div class="section open" data-section="income">
+    <div class="section-head" onclick="toggleSection(this)">
+      <div class="left"><span class="chev">▸</span><span class="ttl">Income</span><span class="count" id="incomeCount"></span></div>
+      <div class="total" id="incomeTotal">$0/mo</div>
+    </div>
+    <div class="section-body">
+      <div id="incomeRows"></div>
+      <button class="add-row" onclick="addRow('income')">+ Add income source</button>
+    </div>
+  </div>
+
+  <!-- EXPENSE CATEGORIES -->
+  <div id="expenseSections"></div>
+
+  <!-- BREAKDOWN -->
+  <div class="section" data-section="breakdown">
+    <div class="section-head" onclick="toggleSection(this)">
+      <div class="left"><span class="chev">▸</span><span class="ttl">Where it's going</span></div>
+      <div class="total"></div>
+    </div>
+    <div class="section-body">
+      <div class="breakdown" id="breakdownList"></div>
+    </div>
+  </div>
+
+  <!-- GOALS / NOTES -->
+  <div class="section" data-section="notes">
+    <div class="section-head" onclick="toggleSection(this)">
+      <div class="left"><span class="chev">▸</span><span class="ttl">Goals & notes</span></div>
+      <div class="total"></div>
+    </div>
+    <div class="section-body">
+      <textarea id="notesArea" placeholder="e.g. Pay off car loan by June. Save $500/mo toward the house fund. Cut back on dining out."></textarea>
+    </div>
+  </div>
+
+  <div class="install-hint print-hide">
+    On your Mac: File → Add to Dock (Safari), or Share → Add to Dock.<br>
+    On iPhone: Share → Add to Home Screen. Your data stays on this device.
+  </div>
+
+</div>
+
+<div class="actionbar print-hide">
+  <button id="whatifBtn" onclick="enterWhatIf()">What if…</button>
+  <button onclick="openShareModal()">Print / Share</button>
+  <button onclick="window.location.href='decision-lab.html'">Big Decision</button>
+  <button class="primary" onclick="addQuickCategory()">+ Category</button>
+</div>
+
+<div class="modal-bg" id="shareModal">
+  <div class="modal">
+    <h3>Print or share</h3>
+    <p>Choose what to include. Everything else stays private.</p>
+    <div id="shareOptions"></div>
+    <div class="modal-actions">
+      <button onclick="closeShareModal()">Cancel</button>
+      <button class="primary" onclick="doPrint()">Print</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------- Data model ---------- */
+const STORAGE_KEY = 'clearway-budget-v1';
+const DEFAULT_CATEGORIES = [
+  'Housing','Transportation','Food & Groceries','Utilities',
+  'Insurance','Debt Payments','Subscriptions','Savings & Investing','Personal & Fun','Other'
+];
+const FREQ = {monthly:1, weekly:4.333, biweekly:2.166, yearly:1/12};
+const FREQ_LABEL = {monthly:'Monthly', weekly:'Weekly', biweekly:'Bi-weekly', yearly:'Yearly'};
+
+function blankState(){
+  return {
+    income: [],
+    expenses: DEFAULT_CATEGORIES.reduce((o,c)=>{o[c]=[];return o;},{}),
+    notes: '',
+    catOrder: DEFAULT_CATEGORIES.slice()
+  };
+}
+
+function load(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if(!raw) return blankState();
+    const parsed = JSON.parse(raw);
+    const base = blankState();
+    return Object.assign(base, parsed, {
+      expenses: Object.assign(base.expenses, parsed.expenses||{})
+    });
+  }catch(e){ return blankState(); }
+}
+
+let state = load();
+let whatIfSnapshot = null; // holds the real saved state while previewing a what-if
+let openSections = new Set(['income']);
+
+function save(){
+  if(whatIfSnapshot) return; // never persist while in what-if mode
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+/* ---------- Rendering ---------- */
+function fmt(n){
+  const v = Math.round(n||0);
+  const sign = v<0 ? '-' : '';
+  return sign + '$' + Math.abs(v).toLocaleString();
+}
+
+function monthly(item){
+  return (parseFloat(item.amount)||0) * (FREQ[item.freq]||1);
+}
+
+function renderRows(container, list, kind, catName){
+  container.innerHTML = '';
+  list.forEach((item, idx)=>{
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `
+      <input type="text" placeholder="${kind==='income'?'Source (e.g. Paycheck)':'Item (e.g. Rent)'}" value="${escapeAttr(item.name||'')}">
+      <input type="number" placeholder="0" value="${item.amount||''}">
+      <select>
+        <option value="monthly">Monthly</option>
+        <option value="weekly">Weekly</option>
+        <option value="biweekly">Bi-weekly</option>
+        <option value="yearly">Yearly</option>
+      </select>
+      <button class="del" title="Remove">×</button>
+    `;
+    const [nameEl, amtEl, freqEl] = row.querySelectorAll('input,select');
+    freqEl.value = item.freq || 'monthly';
+    nameEl.addEventListener('input', e=>{ item.name = e.target.value; save(); });
+    amtEl.addEventListener('input', e=>{ item.amount = e.target.value; save(); renderAll(); });
+    freqEl.addEventListener('change', e=>{ item.freq = e.target.value; save(); renderAll(); });
+    row.querySelector('.del').addEventListener('click', ()=>{
+      list.splice(idx,1); save(); renderAll();
+    });
+    container.appendChild(row);
+  });
+}
+
+function escapeAttr(s){
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+}
+
+function addRow(kind, cat){
+  if(kind==='income'){
+    state.income.push({name:'', amount:'', freq:'monthly'});
+  } else {
+    state.expenses[cat].push({name:'', amount:'', freq:'monthly'});
+  }
+  save(); renderAll();
+}
+
+function addQuickCategory(){
+  const name = prompt('Name this category (e.g. "Kids", "Travel", "Pets")');
+  if(!name) return;
+  if(state.expenses[name]){ alert('That category already exists.'); return; }
+  state.expenses[name] = [];
+  state.catOrder.push(name);
+  save(); renderAll();
+  openSections.add(name);
+}
+
+function totalOf(list){
+  return list.reduce((s,i)=>s+monthly(i),0);
+}
+
+function renderExpenseSections(){
+  const wrap = document.getElementById('expenseSections');
+  wrap.innerHTML = '';
+  state.catOrder.forEach(cat=>{
+    const list = state.expenses[cat] || [];
+    const sec = document.createElement('div');
+    sec.className = 'section' + (openSections.has(cat)?' open':'');
+    sec.dataset.section = cat;
+    sec.innerHTML = `
+      <div class="section-head" onclick="toggleSection(this)">
+        <div class="left"><span class="chev">▸</span><span class="ttl">${cat}</span></div>
+        <div class="total">${fmt(totalOf(list))}/mo</div>
+      </div>
+      <div class="section-body">
+        <div class="rows"></div>
+        <button class="add-row">+ Add to ${cat}</button>
+      </div>
+    `;
+    const rowsEl = sec.querySelector('.rows');
+    renderRows(rowsEl, list, 'expense', cat);
+    sec.querySelector('.add-row').addEventListener('click', ()=>addRow('expense', cat));
+    wrap.appendChild(sec);
+  });
+}
+
+function renderBreakdown(){
+  const el = document.getElementById('breakdownList');
+  const totals = state.catOrder.map(cat=>({cat, total: totalOf(state.expenses[cat]||[])}))
+    .filter(x=>x.total>0)
+    .sort((a,b)=>b.total-a.total);
+  const max = Math.max(1, ...totals.map(t=>t.total));
+  if(totals.length===0){
+    el.innerHTML = '<div style="font-size:13px;color:var(--ink-soft);padding:8px 4px;">Add some expenses to see the breakdown.</div>';
+    return;
+  }
+  el.innerHTML = totals.map(t=>`
+    <div class="bd-row">
+      <div class="lbl">${t.cat}</div>
+      <div class="track"><div style="width:${Math.max(4,(t.total/max*100))}%"></div></div>
+      <div class="amt">${fmt(t.total)}</div>
+    </div>
+  `).join('');
+}
+
+function renderHero(){
+  const incomeTotal = totalOf(state.income);
+  const expenseTotal = state.catOrder.reduce((s,c)=>s+totalOf(state.expenses[c]||[]),0);
+  const net = incomeTotal - expenseTotal;
+
+  const heroNum = document.getElementById('heroNum');
+  const heroSub = document.getElementById('heroSub');
+  heroNum.textContent = fmt(net);
+  heroNum.className = 'num ' + (net>=incomeTotal*0.1 || (incomeTotal===0 && net===0) ? 'good' : net>=0 ? 'warn' : 'bad');
+  if(incomeTotal===0 && expenseTotal===0){
+    heroSub.textContent = "Add your income and expenses below to see where you stand.";
+  } else if(net>=0){
+    const rate = incomeTotal>0 ? Math.round(net/incomeTotal*100) : 0;
+    heroSub.textContent = `You're keeping about ${rate}% of what comes in.`;
+  } else {
+    heroSub.textContent = `You're spending ${fmt(Math.abs(net))} more than you bring in.`;
+  }
+
+  const bar = document.getElementById('heroBar');
+  const spendPct = incomeTotal>0 ? Math.min(100, expenseTotal/incomeTotal*100) : (expenseTotal>0?100:0);
+  bar.innerHTML = `<div style="width:${100-spendPct}%;background:var(--good)"></div><div style="width:${spendPct}%;background:var(--ink-soft)"></div>`;
+
+  document.getElementById('incomeTotal').textContent = fmt(incomeTotal)+'/mo';
+  document.getElementById('incomeCount').textContent = state.income.length ? `${state.income.length} source${state.income.length>1?'s':''}` : '';
+}
+
+function renderAll(){
+  renderRows(document.getElementById('incomeRows'), state.income, 'income');
+  renderExpenseSections();
+  renderBreakdown();
+  renderHero();
+  document.getElementById('notesArea').value = state.notes || '';
+  // restore open/closed state
+  document.querySelectorAll('.section').forEach(sec=>{
+    if(openSections.has(sec.dataset.section)) sec.classList.add('open');
+    else sec.classList.remove('open');
+  });
+}
+
+function toggleSection(headEl){
+  const sec = headEl.closest('.section');
+  const name = sec.dataset.section;
+  if(openSections.has(name)){ openSections.delete(name); sec.classList.remove('open'); }
+  else { openSections.add(name); sec.classList.add('open'); }
+}
+
+document.getElementById('notesArea').addEventListener('input', e=>{
+  state.notes = e.target.value; save();
+});
+
+/* ---------- What if mode ---------- */
+function enterWhatIf(){
+  const btn = document.getElementById('whatifBtn');
+  if(whatIfSnapshot){
+    // already in what-if, button acts as "keep" shortcut disabled — use banner buttons instead
+    return;
+  }
+  whatIfSnapshot = JSON.parse(JSON.stringify(state));
+  document.getElementById('whatifBanner').classList.add('show');
+  btn.classList.add('whatif-active');
+  btn.textContent = 'Exploring…';
+}
+
+function discardWhatIf(){
+  if(!whatIfSnapshot) return;
+  state = whatIfSnapshot;
+  whatIfSnapshot = null;
+  document.getElementById('whatifBanner').classList.remove('show');
+  const btn = document.getElementById('whatifBtn');
+  btn.classList.remove('whatif-active');
+  btn.textContent = 'What if…';
+  renderAll();
+}
+
+function keepWhatIf(){
+  whatIfSnapshot = null; // stop tracking, current `state` becomes real
+  document.getElementById('whatifBanner').classList.remove('show');
+  const btn = document.getElementById('whatifBtn');
+  btn.classList.remove('whatif-active');
+  btn.textContent = 'What if…';
+  save();
+}
+
+document.getElementById('discardWhatif').addEventListener('click', discardWhatIf);
+document.getElementById('keepWhatif').addEventListener('click', keepWhatIf);
+
+document.getElementById('prevMonth').addEventListener('click', ()=>{
+  alert('Clearway tracks your typical monthly budget rather than separate months right now — use "What if…" to test changes before committing them.');
+});
+document.getElementById('nextMonth').addEventListener('click', ()=>{
+  document.getElementById('prevMonth').click();
+});
+
+/* ---------- Share / print ---------- */
+function openShareModal(){
+  const opts = document.getElementById('shareOptions');
+  const sections = [
+    {key:'income', label:'Income'},
+    ...state.catOrder.map(c=>({key:c, label:c})),
+    {key:'breakdown', label:"Where it's going"},
+    {key:'notes', label:'Goals & notes'}
+  ];
+  opts.innerHTML = sections.map(s=>`
+    <label><input type="checkbox" value="${escapeAttr(s.key)}" checked> ${s.label}</label>
+  `).join('');
+  document.getElementById('shareModal').classList.add('show');
+}
+function closeShareModal(){
+  document.getElementById('shareModal').classList.remove('show');
+}
+function doPrint(){
+  const checked = new Set([...document.querySelectorAll('#shareOptions input:checked')].map(i=>i.value));
+  document.querySelectorAll('.section').forEach(sec=>{
+    const key = sec.dataset.section;
+    if(checked.has(key)){
+      sec.classList.add('open');
+      sec.classList.remove('print-hide');
+      sec.style.display = '';
+    } else {
+      sec.style.display = 'none';
+    }
+  });
+  closeShareModal();
+  setTimeout(()=>{
+    window.print();
+    // restore display after print dialog closes
+    setTimeout(()=>{
+      document.querySelectorAll('.section').forEach(sec=>{ sec.style.display=''; });
+      renderAll();
+    }, 300);
+  }, 100);
+}
+
+/* ---------- Init ---------- */
+renderAll();
+</script>
+
+</body>
+</html>
