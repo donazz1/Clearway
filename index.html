@@ -54,6 +54,10 @@
   }
   .lock-card input[type=password]+input[type=password], .lock-card input[type=email]+input[type=password]{margin-top:10px;}
   .lock-card input[type=password]:focus, .lock-card input[type=email]:focus{outline:2px solid var(--good);}
+  .pw-field{position:relative;width:100%;}
+  .pw-field input[type=password], .pw-field input[type=text]{padding-right:40px !important;}
+  .pw-eye{position:absolute !important;right:8px !important;top:50% !important;transform:translateY(-50%) !important;background:none !important;border:none !important;width:auto !important;height:auto !important;margin:0 !important;padding:4px !important;font-size:15px !important;line-height:1 !important;cursor:pointer;}
+  .lock-card .pw-field+.pw-field, .lock-card input[type=email]+.pw-field{margin-top:10px;}
   .lock-card button{
     width:100%;margin-top:12px;padding:14px;border-radius:12px;border:none;
     background:var(--good);color:#fff;font-size:15px;font-weight:600;cursor:pointer;
@@ -232,6 +236,22 @@
   }
   .toast.show{opacity:1;}
 
+  #quickAddFab{
+    position:fixed;
+    right:calc(20px + env(safe-area-inset-right, 0px));
+    bottom:calc(20px + env(safe-area-inset-bottom, 0px));
+    width:56px;height:56px;border-radius:50%;
+    background:var(--ink);color:#fff;border:none;
+    font-size:28px;line-height:1;font-weight:400;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 4px 14px rgba(0,0,0,.25);
+    cursor:pointer;z-index:80;
+    transition:transform .15s ease, opacity .15s ease;
+  }
+  #quickAddFab:active{transform:scale(0.92);}
+  #quickAddFab.hide{display:none;}
+  @media print{ #quickAddFab{display:none !important;} }
+
   .install-hint{text-align:center;font-size:11px;color:var(--ink-soft);margin-top:24px;line-height:1.6;}
 
   /* Modal (print/share) */
@@ -283,7 +303,7 @@
     <div class="mark">Clearway</div>
     <div class="sub" id="authSub">Sign in to sync your budget across every device.</div>
     <input type="email" id="authEmail" placeholder="Email" autocomplete="email">
-    <input type="password" id="authPassword" placeholder="Password" autocomplete="current-password">
+    <span class="pw-field"><input type="password" id="authPassword" placeholder="Password" autocomplete="current-password"><button type="button" class="pw-eye" onclick="togglePw('authPassword', this)">👁️</button></span>
     <button id="authSubmitBtn">Sign in</button>
     <button class="linklike" id="authToggleBtn">Need an account? Sign up</button>
     <button class="linklike" id="authForgotBtn">Forgot password?</button>
@@ -297,7 +317,7 @@
   <div class="lock-card">
     <div class="mark">Clearway</div>
     <div class="sub" id="lockSub">This budget is password-protected. Enter the password to open it.</div>
-    <input type="password" id="lockInput" placeholder="Password" autocomplete="current-password">
+    <span class="pw-field"><input type="password" id="lockInput" name="clearway_device_pin" placeholder="This device's password" autocomplete="off"><button type="button" class="pw-eye" onclick="togglePw('lockInput', this)">👁️</button></span>
     <button id="lockBtn">Unlock</button>
     <button class="linklike" id="lockForgotBtn">Forgot this device's password?</button>
     <div class="err" id="lockErr"></div>
@@ -390,7 +410,7 @@
             <div id="receiptStatus" style="margin-top:14px;"></div>
           </div>
 
-          <div class="card">
+          <div class="card" id="logEntryCard">
             <h3>Log an entry</h3>
             <div class="log-form">
               <div class="field-labeled"><label>Date</label><input type="date" id="logDate"></div>
@@ -509,7 +529,7 @@
               </div>
               <button class="btn" id="showDeleteAccountBtn" onclick="showDeleteAccountForm()" style="color:var(--bad);border-color:var(--bad);">Delete account</button>
               <div id="deleteAccountForm" style="display:none;">
-                <div class="field-labeled" style="margin-top:10px;"><label>Confirm your password</label><input type="password" id="deleteAccountPassword"></div>
+                <div class="field-labeled" style="margin-top:10px;"><label>Confirm your password</label><span class="pw-field"><input type="password" id="deleteAccountPassword" autocomplete="current-password"><button type="button" class="pw-eye" onclick="togglePw('deleteAccountPassword', this)">👁️</button></span></div>
                 <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
                   <button class="btn" onclick="hideDeleteAccountForm()">Cancel</button>
                   <button class="btn" onclick="deleteAccount()" style="background:var(--bad);color:#fff;border-color:var(--bad);">Permanently delete</button>
@@ -537,8 +557,8 @@
 
             <div id="setPasswordBlock">
               <div class="field-grid">
-                <div class="field-labeled"><label>New password</label><input type="password" id="newPass1"></div>
-                <div class="field-labeled"><label>Confirm password</label><input type="password" id="newPass2"></div>
+                <div class="field-labeled"><label>New password</label><span class="pw-field"><input type="password" id="newPass1" name="clearway_new_device_pin" autocomplete="new-password"><button type="button" class="pw-eye" onclick="togglePw('newPass1', this)">👁️</button></span></div>
+                <div class="field-labeled"><label>Confirm password</label><span class="pw-field"><input type="password" id="newPass2" name="clearway_confirm_device_pin" autocomplete="new-password"><button type="button" class="pw-eye" onclick="togglePw('newPass2', this)">👁️</button></span></div>
               </div>
               <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
                 <button class="btn primary" onclick="setPassword()">Set password</button>
@@ -550,8 +570,8 @@
 
             <div id="removePasswordBlock" style="display:none;">
               <div class="field-grid">
-                <div class="field-labeled"><label>Current password</label><input type="password" id="curPassForChange"></div>
-                <div class="field-labeled"><label>New password (optional)</label><input type="password" id="newPassForChange"></div>
+                <div class="field-labeled"><label>Current password</label><span class="pw-field"><input type="password" id="curPassForChange" name="clearway_current_device_pin" autocomplete="off"><button type="button" class="pw-eye" onclick="togglePw('curPassForChange', this)">👁️</button></span></div>
+                <div class="field-labeled"><label>New password (optional)</label><span class="pw-field"><input type="password" id="newPassForChange" name="clearway_updated_device_pin" autocomplete="new-password"><button type="button" class="pw-eye" onclick="togglePw('newPassForChange', this)">👁️</button></span></div>
               </div>
               <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
                 <button class="btn" onclick="changePassword()">Update password</button>
@@ -570,6 +590,7 @@
       </div>
     </div>
   </div>
+  <button id="quickAddFab" onclick="openQuickAdd()" title="Add income or an expense" aria-label="Add income or an expense">+</button>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -1047,6 +1068,19 @@ function switchView(key){
   if(key==='yearview') renderYearView();
   closeSidebarMobile();
   document.querySelector('.content-wrap').scrollTop = 0;
+
+  const fab = document.getElementById('quickAddFab');
+  if(fab) fab.classList.toggle('hide', key==='log');
+}
+
+function openQuickAdd(){
+  switchView('log');
+  setTimeout(()=>{
+    const card = document.getElementById('logEntryCard');
+    if(card) card.scrollIntoView({behavior:'smooth', block:'start'});
+    const merchantField = document.getElementById('logMerchant');
+    if(merchantField) setTimeout(()=>merchantField.focus(), 300);
+  }, 50);
 }
 
 function renderCategoryViews(){
@@ -1595,6 +1629,14 @@ function removePassword(){
   document.getElementById('curPassForChange').value='';
   renderSecurityStatus();
   showToast('Password removed.');
+}
+
+function togglePw(id, btn){
+  const input = document.getElementById(id);
+  const showing = input.type === 'text';
+  input.type = showing ? 'password' : 'text';
+  btn.textContent = showing ? '👁️' : '🙈';
+  btn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
 }
 
 function showToast(msg){
