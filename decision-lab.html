@@ -162,7 +162,7 @@
 
     <div class="rideshare-body" id="rsBody">
       <div class="disclaimer">
-"Active" means a human drives; "Passive" means the car drives itself — everything else (fare, split, cost) is one shared model either way, so you can shape it to whatever arrangement actually applies: a network taking a cut (the split defaults to 70% yours / 30% platform, a placeholder in the range analysts like Cern Basher (@CernBasher on X) have floated for Tesla specifically), or private clientele with no platform at all — set the split to 100% for that. Passive mode's real unlock either way is hours: a car doesn't get tired, so it can serve more trips than one person driving ever could.
+"Active" means a human drives; "Passive" means the car drives itself — everything else (fare, split, cost) is one shared model either way, so you can shape it to whatever arrangement actually applies. Most people are some mix of private clientele (100% theirs) and platform trips (a cut goes to whoever runs the network — 70% yours / 30% platform by default, a placeholder in the range analysts like Cern Basher (@CernBasher on X) have floated for Tesla specifically) — set the mix below to match reality. Passive mode's real unlock either way is hours: a car doesn't get tired, so it can serve more trips than one person driving ever could.
       </div>
 
       <label style="display:flex;align-items:center;gap:8px;margin-bottom:14px;font-size:13px;font-weight:600;">
@@ -171,6 +171,7 @@
 
       <div class="presets" id="rsPresets"></div>
       <div id="rsFields"></div>
+      <div class="proj-summary" id="effShareLine" style="margin-top:10px;"></div>
 
       <details class="assumptions projection">
         <summary>Reverse-solve: aim for a target income</summary>
@@ -186,7 +187,7 @@
       <details class="assumptions">
         <summary>How this is calculated</summary>
         <div style="font-size:12px;color:var(--ink-soft);margin-top:8px;line-height:1.7;">
-          Gross fares = hours/week × fares/hour × avg fare. Your share = gross fares × your split (100% if you're not on any network — set the platform's cut to 0 for private clientele). Operating cost = hours/week × avg speed (km/h) × cost per km. Net = your share − operating cost. In passive mode, "hours/week" is the vehicle's time earning instead of your own — same formula either way, since taking yourself out of the driver's seat doesn't change the fare economics, only whose hours they are and how many of them are realistic.
+          Gross fares = hours/week × fares/hour × avg fare. Your blended share = (% private × 100%) + (% platform × your network share) — shown below the fields. Your take = gross fares × blended share. Operating cost = hours/week × avg speed (km/h) × cost per km. Net = your take − operating cost. In passive mode, "hours/week" is the vehicle's time earning instead of your own — same formula either way, since taking yourself out of the driver's seat doesn't change the fare economics, only whose hours they are and how many of them are realistic.
         </div>
       </details>
 
@@ -241,7 +242,8 @@ function defaultState(){
       hoursPerWeek: 20,
       faresPerHour: 1.5,
       avgFare: 14,
-      splitPct: 70,
+      privateMixPct: 0,
+      networkSplitPct: 70,
       costPerMile: 0.12,
       avgMph: 22,
       goalTargetAnnual: ''
@@ -349,10 +351,18 @@ const RS_FIELDS = [
   ['hoursPerWeek', null, 'hrs'], // label filled in dynamically — depends on active/passive
   ['faresPerHour','Fares per hour (avg)','fares'],
   ['avgFare','Average fare','$'],
-  ['splitPct','Your share of each fare (100 if no platform)','%'],
+  ['privateMixPct','% of trips that are private clientele (100% yours)','%'],
+  ['networkSplitPct','Your share on the rest (platform trips)','%'],
   ['costPerMile','Operating cost per km','$/km'],
   ['avgMph','Average speed while earning','km/h']
 ];
+// A mix of private clientele (100% his) and platform/network trips (his share of
+// those only) — blended into one effective share, held constant across presets.
+function effectiveSharePct(rs){
+  const priv = Math.max(0, Math.min(100, parseFloat(rs.privateMixPct)||0)) / 100;
+  const netShare = Math.max(0, Math.min(100, parseFloat(rs.networkSplitPct)||0)) / 100;
+  return priv*1 + (1-priv)*netShare; // 0..1
+}
 function hoursFieldLabel(passive){
   return passive ? 'Vehicle hours per week (Tesla-dispatched)' : 'Your hours per week driving';
 }
@@ -374,7 +384,7 @@ function computeRideshareForPreset(passive, key){
   const rs = state.rideshare;
   const fph = parseFloat(rs.faresPerHour)||0;
   const fare = parseFloat(rs.avgFare)||0;
-  const split = (parseFloat(rs.splitPct)||0)/100;
+  const split = effectiveSharePct(rs);
   const mph = parseFloat(rs.avgMph)||0;
   const grossWeekly = p.hoursPerWeek * fph * fare;
   const shareWeekly = grossWeekly * split;
@@ -447,7 +457,7 @@ function renderGoalSeek(){
 
   const fph = parseFloat(rs.faresPerHour)||0;
   const fare = parseFloat(rs.avgFare)||0;
-  const split = (parseFloat(rs.splitPct)||0)/100;
+  const split = effectiveSharePct(rs);
   const cpm = parseFloat(rs.costPerMile)||0;
   const mph = parseFloat(rs.avgMph)||0;
   const netPerHour = (fph*fare*split) - (mph*cpm);
@@ -524,7 +534,7 @@ function computeRideshare(){
   const hours = parseFloat(rs.hoursPerWeek)||0;
   const fph = parseFloat(rs.faresPerHour)||0;
   const fare = parseFloat(rs.avgFare)||0;
-  const split = (parseFloat(rs.splitPct)||0)/100;
+  const split = effectiveSharePct(rs);
   const cpm = parseFloat(rs.costPerMile)||0;
   const mph = parseFloat(rs.avgMph)||0;
 
@@ -593,6 +603,8 @@ function compute(){
   document.getElementById('rsMonthly').textContent = fmt(rsData.netMonthly);
   const covers = rsData.netMonthly >= costData.pmt && costData.pmt>0;
   document.getElementById('rsCovers').textContent = costData.pmt>0 ? (covers?'Yes':'Not quite') : '—';
+  const effPct = effectiveSharePct(state.rideshare)*100;
+  document.getElementById('effShareLine').textContent = `Blended: every $1 of fares nets you ${effPct.toFixed(0)}¢ before operating cost.`;
 
   computeVerdict(costData, rsData);
   renderProjection();
