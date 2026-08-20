@@ -89,6 +89,8 @@
   }
   .navitem:hover{background:#2A332580;}
   .navitem.active{background:var(--sidebar-active);font-weight:600;}
+  .navitem.dragging{background:var(--sidebar-active) !important;box-shadow:0 8px 18px rgba(0,0,0,.35);opacity:0.92;position:relative;z-index:60;transition:none !important;}
+  .navitem[data-cat]{user-select:none;-webkit-user-select:none;}
   .navitem .amt{font-family:var(--mono);font-size:11px;color:var(--sidebar-soft);}
   .navitem.active .amt{color:var(--sidebar-ink);}
   .nav-add{
@@ -426,11 +428,11 @@
             <h3>Log an entry</h3>
             <div class="log-form">
               <div class="field-labeled"><label>Date</label><input type="date" id="logDate"></div>
-              <div class="field-labeled"><label>Merchant</label><input type="text" id="logMerchant" placeholder="e.g. Shell, Sobeys"></div>
               <div class="field-labeled">
                 <label>Bucket</label>
                 <select id="logBucket"></select>
               </div>
+              <div class="field-labeled" style="grid-column:1 / -1;"><label>Merchant</label><input type="text" id="logMerchant" placeholder="e.g. Shell, Sobeys"></div>
               <div class="field-labeled"><label>Amount</label><input type="text" id="logAmount" placeholder="0"></div>
               <div class="field-labeled"><label>Tax (optional)</label><input type="text" id="logTax" placeholder="0"></div>
               <div class="field-labeled" style="grid-column:1 / -1;"><label>Note (optional)</label><input type="text" id="logNote" placeholder="e.g. Friday night fares, oil change too"></div>
@@ -1017,6 +1019,7 @@ function showApp(){
   renderSecurityStatus();
   renderAccountStatus();
   initReceiptScanner();
+  initCategoryDrag();
 }
 
 /* ---------- Formatting ---------- */
@@ -1052,6 +1055,7 @@ function renderNav(){
   state.catOrder.forEach(cat=>{
     const b = document.createElement('button');
     b.className = 'navitem' + (currentView===('cat:'+cat)?' active':'');
+    b.dataset.cat = cat;
     b.innerHTML = `<span>${cat}</span><span class="amt">${fmt(totalOf(state.expenses[cat]))}/mo</span>`;
     b.addEventListener('click', ()=>switchView('cat:'+cat));
     wrap.appendChild(b);
@@ -1183,6 +1187,119 @@ function addQuickCategory(){
 function closeAddCategoryModal(){
   document.getElementById('addCategoryModal').classList.remove('show');
 }
+/* ---------- Drag-to-reorder categories (long-press, then drag) ---------- */
+let categoryDragState = null;
+let categoryDragSuppressClick = false;
+
+let categoryDragInitialized = false;
+function initCategoryDrag(){
+  if(categoryDragInitialized) return; // showApp() can run more than once per page load (sign out, then back in)
+  categoryDragInitialized = true;
+  const navlist = document.getElementById('navlist');
+  navlist.addEventListener('pointerdown', onCategoryPointerDown);
+  navlist.addEventListener('click', e=>{
+    if(categoryDragSuppressClick){ e.stopPropagation(); e.preventDefault(); }
+  }, true);
+}
+
+function onCategoryPointerDown(e){
+  if(e.button === 2) return; // ignore right-click
+  const item = e.target.closest('.navitem[data-cat]');
+  if(!item) return;
+  const startY = e.clientY;
+  const pointerId = e.pointerId;
+  let longPressFired = false;
+
+  const longPressTimer = setTimeout(()=>{
+    longPressFired = true;
+    beginCategoryDrag(item, startY, pointerId);
+  }, 350);
+
+  function cleanupEarly(){
+    document.removeEventListener('pointermove', onEarlyMove);
+    document.removeEventListener('pointerup', onEarlyUp);
+  }
+  function onEarlyMove(moveEvt){
+    if(!longPressFired && Math.abs(moveEvt.clientY - startY) > 8){
+      clearTimeout(longPressTimer);
+      cleanupEarly();
+    }
+  }
+  function onEarlyUp(){
+    clearTimeout(longPressTimer);
+    cleanupEarly();
+  }
+  document.addEventListener('pointermove', onEarlyMove);
+  document.addEventListener('pointerup', onEarlyUp);
+}
+
+function beginCategoryDrag(item, startY, pointerId){
+  const cat = item.dataset.cat;
+  const startIndex = state.catOrder.indexOf(cat);
+  if(startIndex === -1) return;
+
+  try{ item.setPointerCapture(pointerId); }catch(err){}
+  item.classList.add('dragging');
+  item.style.touchAction = 'none';
+  if(navigator.vibrate) navigator.vibrate(10);
+
+  const rect = item.getBoundingClientRect();
+  categoryDragState = { cat, currentIndex: startIndex, itemTop: rect.top, itemHeight: rect.height, startY };
+
+  const onMove = (e) => {
+    if(!categoryDragState) return;
+    const deltaY = e.clientY - categoryDragState.startY;
+    item.style.transform = `translateY(${deltaY}px)`;
+
+    const catItems = [...document.querySelectorAll('.navitem[data-cat]')];
+    const draggedCenter = categoryDragState.itemTop + categoryDragState.itemHeight/2 + deltaY;
+    let targetIndex = categoryDragState.currentIndex;
+
+    catItems.forEach((el) => {
+      if(el === item) return;
+      const elIndex = state.catOrder.indexOf(el.dataset.cat);
+      const r = el.getBoundingClientRect();
+      const elCenter = r.top + r.height/2;
+      if(elIndex < categoryDragState.currentIndex && draggedCenter < elCenter) targetIndex = Math.min(targetIndex, elIndex);
+      else if(elIndex > categoryDragState.currentIndex && draggedCenter > elCenter) targetIndex = Math.max(targetIndex, elIndex);
+    });
+
+    if(targetIndex !== categoryDragState.currentIndex){
+      const [moved] = state.catOrder.splice(categoryDragState.currentIndex, 1);
+      state.catOrder.splice(targetIndex, 0, moved);
+      categoryDragState.currentIndex = targetIndex;
+      renderNav();
+      const newItem = document.querySelector(`.navitem[data-cat="${CSS.escape(cat)}"]`);
+      if(newItem){
+        newItem.classList.add('dragging');
+        newItem.style.touchAction = 'none';
+        const newRect = newItem.getBoundingClientRect();
+        categoryDragState.itemTop = newRect.top - deltaY;
+        categoryDragState.itemHeight = newRect.height;
+        try{ newItem.setPointerCapture(pointerId); }catch(err){}
+        item = newItem;
+        item.style.transform = `translateY(${deltaY}px)`;
+      }
+    }
+  };
+
+  const onUp = () => {
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    if(item){ item.classList.remove('dragging'); item.style.transform=''; item.style.touchAction=''; }
+    if(categoryDragState){
+      saveLocal();
+      categoryDragSuppressClick = true;
+      setTimeout(()=>{ categoryDragSuppressClick = false; }, 80);
+    }
+    categoryDragState = null;
+    renderNav();
+  };
+
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', onUp);
+}
+
 function confirmAddCategory(){
   const name = document.getElementById('newCategoryInput').value.trim();
   if(!name) return;
@@ -1191,7 +1308,8 @@ function confirmAddCategory(){
   state.catOrder.push(name);
   saveLocal();
   closeAddCategoryModal();
-  switchView('cat:'+name);
+  renderNav(); // reflect the new category in the sidebar without navigating into it
+  showToast(`Added "${name}".`);
 }
 document.getElementById('newCategoryInput').addEventListener('keydown', e=>{ if(e.key==='Enter') confirmAddCategory(); });
 
@@ -1353,16 +1471,65 @@ const PHARMACY_SIGNALS = ['pharmacy','prescription','dispensing fee','patient pa
 // restaurant bill) the pre-tip amount — the card-sale line is the true final charge.
 const AMOUNT_PRIORITY_KEYWORDS = ['debit card sale','credit card sale','card sale','amount charged','patient pays','patient pay','you pay','amount due','amount paid','balance due','copay'];
 
+// Finds the real category name in this account matching a canonical concept, even if the
+// user renamed or extended it (e.g. "Dining Out & Take Out" should still match "Dining Out") —
+// an exact-string check would silently fail the moment someone personalizes a category name.
+function findMatchingCategory(canonicalName){
+  const needle = canonicalName.toLowerCase();
+  return state.catOrder.find(c => c.toLowerCase().includes(needle)) || null;
+}
+
 function guessBucket(lower){
   const isPharmacy = PHARMACY_SIGNALS.some(k=>lower.includes(k));
   if(isPharmacy){
     const healthCat = state.catOrder.find(c => /health|medical|pharmacy|prescription/i.test(c));
     return healthCat || null; // don't fall through to a generic store-name match on a medical receipt
   }
-  for(const [cat, keywords] of Object.entries(RECEIPT_KEYWORDS)){
-    if(state.catOrder.includes(cat) && keywords.some(k=>lower.includes(k))) return cat;
+  for(const [canonicalCat, keywords] of Object.entries(RECEIPT_KEYWORDS)){
+    if(keywords.some(k=>lower.includes(k))){
+      const matched = findMatchingCategory(canonicalCat);
+      if(matched) return matched;
+    }
   }
   return null;
+}
+
+// Pulls a date off the receipt itself, not the day it happened to be scanned — a receipt
+// from yesterday shouldn't get logged as today just because that's when the photo was taken.
+function parseReceiptDate(text){
+  const MONTHS = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+  let year, month, day;
+
+  let m = text.match(/\b(\d{1,2})[\s-](jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s-](\d{4})\b/i);
+  if(m){ day=parseInt(m[1],10); month=MONTHS[m[2].toLowerCase().slice(0,3)]; year=parseInt(m[3],10); }
+
+  if(!month){
+    m = text.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s.]+(\d{1,2}),?\s+(\d{4})\b/i);
+    if(m){ month=MONTHS[m[1].toLowerCase().slice(0,3)]; day=parseInt(m[2],10); year=parseInt(m[3],10); }
+  }
+
+  if(!month){
+    m = text.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
+    if(m){ year=parseInt(m[1],10); month=parseInt(m[2],10); day=parseInt(m[3],10); }
+  }
+
+  if(!month){
+    m = text.match(/\b(\d{1,2})[\/](\d{1,2})[\/](\d{4})\b/);
+    if(m){
+      let a=parseInt(m[1],10), b=parseInt(m[2],10);
+      year=parseInt(m[3],10); month=a; day=b;
+      if(a > 12 && b <= 12){ month=b; day=a; } // first number can't be a month, so it must be the day
+    }
+  }
+
+  if(!month || month<1 || month>12 || !day || day<1 || day>31) return null;
+
+  const iso = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+  const parsedTime = new Date(iso+'T00:00:00').getTime();
+  const now = Date.now();
+  const threeYearsMs = 3*365*24*60*60*1000;
+  if(isNaN(parsedTime) || parsedTime > now+86400000 || parsedTime < now-threeYearsMs) return null; // implausible — likely an OCR misread, don't trust it
+  return iso;
 }
 
 function parseReceiptText(text){
@@ -1402,8 +1569,9 @@ function parseReceiptText(text){
   const merchant = merchantCandidates.find(l => !GENERIC_RECEIPT_HEADERS.test(l.trim())) || merchantCandidates[0] || '';
 
   const bucket = guessBucket(lower);
+  const date = parseReceiptDate(text);
 
-  return { amount, tax, merchant, bucket, rawText: text };
+  return { amount, tax, merchant, bucket, date, rawText: text };
 }
 
 function setReceiptStatus(html){
@@ -1469,23 +1637,30 @@ async function handleReceiptFile(file){
     if(parsed.tax) document.getElementById('logTax').value = parsed.tax.toFixed(2);
     if(parsed.merchant) document.getElementById('logMerchant').value = parsed.merchant;
     if(parsed.bucket) document.getElementById('logBucket').value = parsed.bucket;
+    if(parsed.date) document.getElementById('logDate').value = parsed.date;
 
     const statusText = document.getElementById('receiptStatusText');
     const found = [], missing = [];
     if(parsed.amount) found.push('amount'); else missing.push('amount');
     if(parsed.tax) found.push('tax');
+    if(parsed.date) found.push('date');
     if(parsed.merchant) found.push('merchant'); else missing.push('merchant');
     if(parsed.bucket) found.push('category'); else missing.push('category');
+
+    function joinWithAnd(arr){
+      if(arr.length<=1) return arr.join('');
+      return arr.slice(0,-1).join(', ') + ' and ' + arr[arr.length-1];
+    }
 
     if(found.length===0){
       statusText.className = 'receipt-status-text error';
       statusText.textContent = "Couldn't make out anything useful — enter it manually below.";
     } else if(missing.length===0){
       statusText.className = 'receipt-status-text ready';
-      statusText.textContent = 'Got the amount, merchant, and category — check them, then tap Add entry.';
+      statusText.textContent = `Got the ${joinWithAnd(found)} — check them, then tap Add entry.`;
     } else {
       statusText.className = 'receipt-status-text ready';
-      statusText.textContent = `Got the ${found.join(' and ')}. Couldn't tell the ${missing.join(' or ')} — fill that in below.`;
+      statusText.textContent = `Got the ${joinWithAnd(found)}. Couldn't tell the ${joinWithAnd(missing)} — fill that in below.`;
     }
     document.getElementById('receiptStatus').insertAdjacentHTML('beforeend', `
       <details class="receipt-raw"><summary>What it read</summary><pre>${escapeAttr(text || '(no text found)')}</pre></details>
