@@ -336,6 +336,18 @@
   </div>
 </div>
 
+<div class="modal-bg" id="addCategoryModal">
+  <div class="modal">
+    <h3>New category</h3>
+    <p>e.g. "Dining Out", "Kids", "Travel"</p>
+    <input type="text" id="newCategoryInput" placeholder="Category name" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--paper);font-size:14px;color:var(--ink);">
+    <div class="modal-actions">
+      <button onclick="closeAddCategoryModal()">Cancel</button>
+      <button class="primary" onclick="confirmAddCategory()">Add</button>
+    </div>
+  </div>
+</div>
+
 <!-- APP -->
 <div id="app">
   <div class="backdrop" id="backdrop"></div>
@@ -590,7 +602,7 @@
       </div>
     </div>
   </div>
-  <button id="quickAddFab" onclick="openQuickAdd()" title="Add income or an expense" aria-label="Add income or an expense">+</button>
+  <button id="quickAddFab" onclick="openQuickAdd()" title="Scan a receipt" aria-label="Scan a receipt">+</button>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -1074,13 +1086,12 @@ function switchView(key){
 }
 
 function openQuickAdd(){
+  // Switch to the log view first (synchronously, no delay) so the camera input is actually
+  // present and clickable, then trigger it in the same call stack as the tap — iOS Safari
+  // requires the camera/file picker to open as a direct result of a user gesture, so this
+  // can't be deferred with setTimeout or it'll silently refuse to open.
   switchView('log');
-  setTimeout(()=>{
-    const card = document.getElementById('logEntryCard');
-    if(card) card.scrollIntoView({behavior:'smooth', block:'start'});
-    const merchantField = document.getElementById('logMerchant');
-    if(merchantField) setTimeout(()=>merchantField.focus(), 300);
-  }, 50);
+  document.getElementById('receiptInput').click();
 }
 
 function renderCategoryViews(){
@@ -1149,14 +1160,24 @@ function addRow(kind, cat){
   saveLocal(); switchView(currentView);
 }
 function addQuickCategory(){
-  const name = prompt('Name this category (e.g. "Kids", "Travel", "Pets")');
+  document.getElementById('newCategoryInput').value = '';
+  document.getElementById('addCategoryModal').classList.add('show');
+  setTimeout(()=>document.getElementById('newCategoryInput').focus(), 100);
+}
+function closeAddCategoryModal(){
+  document.getElementById('addCategoryModal').classList.remove('show');
+}
+function confirmAddCategory(){
+  const name = document.getElementById('newCategoryInput').value.trim();
   if(!name) return;
-  if(state.expenses[name]){ alert('That category already exists.'); return; }
+  if(state.expenses[name]){ showToast('That category already exists.'); return; }
   state.expenses[name] = [];
   state.catOrder.push(name);
   saveLocal();
+  closeAddCategoryModal();
   switchView('cat:'+name);
 }
+document.getElementById('newCategoryInput').addEventListener('keydown', e=>{ if(e.key==='Enter') confirmAddCategory(); });
 
 /* ---------- Activity log ---------- */
 function todayISO(){ return new Date().toISOString().slice(0,10); }
