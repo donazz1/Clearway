@@ -162,51 +162,33 @@
 
     <div class="rideshare-body" id="rsBody">
       <div class="disclaimer">
-        Nothing here is confirmed by Tesla. There's no live driver-operated or passive-robotaxi program in Canada. Two different scenarios are modeled below — pick the one that matches what Dave's actually picturing.
+"Active" means a human drives; "Passive" means the car drives itself — everything else (fare, split, cost) is one shared model either way, so you can shape it to whatever arrangement actually applies: a network taking a cut (the split defaults to 70% yours / 30% platform, a placeholder in the range analysts like Cern Basher (@CernBasher on X) have floated for Tesla specifically), or private clientele with no platform at all — set the split to 100% for that. Passive mode's real unlock either way is hours: a car doesn't get tired, so it can serve more trips than one person driving ever could.
       </div>
 
       <label style="display:flex;align-items:center;gap:8px;margin-bottom:14px;font-size:13px;font-weight:600;">
         <input type="checkbox" id="passiveMode"> Passive mode — the car earns on its own; I'm not the one driving it
       </label>
 
-      <div id="activeBlock">
-        <div class="presets">
-          <button data-p="conservative">Conservative</button>
-          <button data-p="moderate" class="active">Moderate</button>
-          <button data-p="optimistic">Optimistic</button>
-        </div>
-        <div id="rsFields"></div>
+      <div class="presets" id="rsPresets"></div>
+      <div id="rsFields"></div>
 
-        <details class="assumptions projection">
-          <summary>Reverse-solve: aim for a target income</summary>
-          <div style="margin-top:12px;">
-            <div class="field" style="border-bottom:none;">
-              <label>Target annual income from driving</label>
-              <input type="number" step="any" id="goalTarget"><span class="unit">$/yr</span>
-            </div>
-            <div class="proj-summary" id="goalSummary"></div>
+      <details class="assumptions projection">
+        <summary>Reverse-solve: aim for a target income</summary>
+        <div style="margin-top:12px;">
+          <div class="field" style="border-bottom:none;">
+            <label id="goalTargetLabel">Target annual income</label>
+            <input type="number" step="any" id="goalTarget"><span class="unit">$/yr</span>
           </div>
-        </details>
-
-        <details class="assumptions">
-          <summary>How this is calculated</summary>
-          <div style="font-size:12px;color:var(--ink-soft);margin-top:8px;line-height:1.7;">
-            Gross fares = hours/week × fares/hour × avg fare. Driver share = gross fares × your revenue split %. Operating cost = hours/week × avg speed (km/h) × cost per km. Net = driver share − operating cost. This is a from-scratch estimate — there's no real driver-operated Tesla network to benchmark against, so treat every input as a guess you can adjust.
-          </div>
-        </details>
-      </div>
-
-      <div id="passiveBlock" style="display:none;">
-        <div class="disclaimer" style="background:var(--good-soft);border-color:var(--good);">
-          Grounded in Cern Basher's (@CernBasher on X) published Cybercab/Robotaxi modeling: a $3 base + $1/mile fare, a baseline 35% vehicle utilization (8.4 hrs/day in service), and Tesla take rates ranging 15–50%. He calls a 35% take rate — Tesla 35%, owner 65% — "a pretty good mix."
+          <div class="proj-summary" id="goalSummary"></div>
         </div>
-        <div class="presets">
-          <button data-p2="tesla_favored">Tesla takes more (50%)</button>
-          <button data-p2="balanced" class="active">Balanced (35%)</button>
-          <button data-p2="owner_favored">Owner takes more (15%)</button>
+      </details>
+
+      <details class="assumptions">
+        <summary>How this is calculated</summary>
+        <div style="font-size:12px;color:var(--ink-soft);margin-top:8px;line-height:1.7;">
+          Gross fares = hours/week × fares/hour × avg fare. Your share = gross fares × your split (100% if you're not on any network — set the platform's cut to 0 for private clientele). Operating cost = hours/week × avg speed (km/h) × cost per km. Net = your share − operating cost. In passive mode, "hours/week" is the vehicle's time earning instead of your own — same formula either way, since taking yourself out of the driver's seat doesn't change the fare economics, only whose hours they are and how many of them are realistic.
         </div>
-        <div id="passiveFields"></div>
-      </div>
+      </details>
 
       <div class="rs-out">
         <div class="rs-card"><div class="k">Weekly net</div><div class="v" id="rsWeekly">$0</div></div>
@@ -262,9 +244,6 @@ function defaultState(){
       splitPct: 70,
       costPerMile: 0.12,
       avgMph: 22,
-      passivePreset: 'balanced',
-      takeRatePct: 35,
-      utilizationPctDay: 35,
       goalTargetAnnual: ''
     }
   };
@@ -350,64 +329,57 @@ function renderFactors(){
   });
 }
 
-/* ---------- Rideshare ---------- */
-const PRESETS = {
-  conservative: { hoursPerWeek:15, faresPerHour:1.0, avgFare:12, splitPct:65, costPerMile:0.14, avgMph:20 },
-  moderate:     { hoursPerWeek:20, faresPerHour:1.5, avgFare:14, splitPct:70, costPerMile:0.12, avgMph:22 },
-  optimistic:   { hoursPerWeek:28, faresPerHour:2.0, avgFare:16, splitPct:75, costPerMile:0.10, avgMph:24 }
+/* ---------- Rideshare ----------
+   Both modes (you drive vs. the car drives itself) share one fare/cost model —
+   same fares/hour, avg fare, split, and speed either way. Presets only vary
+   hours/week and operating cost. Passive-mode hours can run far higher than
+   active's, since a car doesn't get tired — that's the only real lever. */
+const ACTIVE_PRESETS = {
+  conservative: { hoursPerWeek:15, costPerMile:0.14 },
+  moderate:     { hoursPerWeek:20, costPerMile:0.12 },
+  optimistic:   { hoursPerWeek:28, costPerMile:0.10 }
 };
+const PASSIVE_PRESETS = {
+  conservative: { hoursPerWeek:30, costPerMile:0.14 },
+  moderate:     { hoursPerWeek:50, costPerMile:0.12 },
+  optimistic:   { hoursPerWeek:70, costPerMile:0.10 }
+};
+const PRESET_LABELS = { conservative:'Conservative', moderate:'Moderate', optimistic:'Optimistic' };
 const RS_FIELDS = [
-  ['hoursPerWeek','Hours per week on the network','hrs'],
+  ['hoursPerWeek', null, 'hrs'], // label filled in dynamically — depends on active/passive
   ['faresPerHour','Fares per hour (avg)','fares'],
   ['avgFare','Average fare','$'],
-  ['splitPct','Your revenue share','%'],
+  ['splitPct','Your share of each fare (100 if no platform)','%'],
   ['costPerMile','Operating cost per km','$/km'],
   ['avgMph','Average speed while earning','km/h']
 ];
-const PASSIVE_FIELDS = [
-  ['takeRatePct',"Tesla's take rate",'%'],
-  ['utilizationPctDay','Vehicle utilization (of each day)','%']
-];
-const PASSIVE_PRESETS = {
-  tesla_favored: { takeRatePct:50 },
-  balanced:      { takeRatePct:35 },
-  owner_favored: { takeRatePct:15 }
-};
-// Net profit per vehicle per YEAR to the owner, at 35% baseline utilization,
-// from Cern Basher's published take-rate sensitivity (15% -> $18,000, 35% -> $10,500, 50% -> $4,900).
-function passiveNetAnnualAtBaseline(takeRate){
-  const pts = [[15,18000],[35,10500],[50,4900]];
-  if(takeRate<=pts[0][0]) return pts[0][1];
-  if(takeRate>=pts[pts.length-1][0]) return pts[pts.length-1][1];
-  for(let i=0;i<pts.length-1;i++){
-    const [x0,y0]=pts[i], [x1,y1]=pts[i+1];
-    if(takeRate>=x0 && takeRate<=x1){
-      const t = (takeRate-x0)/(x1-x0);
-      return y0 + t*(y1-y0);
-    }
-  }
-  return pts[1][1];
+function hoursFieldLabel(passive){
+  return passive ? 'Vehicle hours per week (Tesla-dispatched)' : 'Your hours per week driving';
 }
+// Roughly how many hours/week one vehicle can plausibly deliver — a person
+// physically driving vs. a car that only stops to charge. Past this, hitting
+// a goal isn't a "drive more" problem, it's a "you'd need another vehicle" one.
+const MAX_HOURS_PER_WEEK = { active: 70, passive: 140 };
 
 /* ---------- 12-month projection chart ---------- */
 // Independent of the live-edited fields above — always computed from the canned presets,
 // so flipping through Conservative/Moderate/Optimistic here is a quick side-by-side,
 // not tied to whatever custom numbers are currently in the fields.
 let projActiveKey = 'moderate';
-let projPassiveKey = 'balanced';
+let projPassiveKey = 'moderate';
 
 function computeRideshareForPreset(passive, key){
-  if(passive){
-    const ov = PASSIVE_PRESETS[key];
-    const util = parseFloat(state.rideshare.utilizationPctDay)||35;
-    const baseAnnual = passiveNetAnnualAtBaseline(ov.takeRatePct);
-    return (baseAnnual * (util/35)) / 12;
-  }
-  const p = PRESETS[key];
-  const grossWeekly = p.hoursPerWeek * p.faresPerHour * p.avgFare;
-  const driverShareWeekly = grossWeekly * (p.splitPct/100);
-  const opCostWeekly = p.hoursPerWeek * p.avgMph * p.costPerMile;
-  return (driverShareWeekly - opCostWeekly) * 4.333;
+  const table = passive ? PASSIVE_PRESETS : ACTIVE_PRESETS;
+  const p = table[key];
+  const rs = state.rideshare;
+  const fph = parseFloat(rs.faresPerHour)||0;
+  const fare = parseFloat(rs.avgFare)||0;
+  const split = (parseFloat(rs.splitPct)||0)/100;
+  const mph = parseFloat(rs.avgMph)||0;
+  const grossWeekly = p.hoursPerWeek * fph * fare;
+  const shareWeekly = grossWeekly * split;
+  const opCostWeekly = p.hoursPerWeek * mph * p.costPerMile;
+  return (shareWeekly - opCostWeekly) * 4.333;
 }
 
 function buildYearChartSVG(monthlyNet){
@@ -432,14 +404,11 @@ function buildYearChartSVG(monthlyNet){
 
 function renderProjection(){
   const passive = !!state.rideshare.passive;
-  const labels = passive
-    ? {tesla_favored:'Tesla takes more (50%)', balanced:'Balanced (35%)', owner_favored:'Owner takes more (15%)'}
-    : {conservative:'Conservative', moderate:'Moderate', optimistic:'Optimistic'};
   const activeKey = passive ? projPassiveKey : projActiveKey;
 
   const pwrap = document.getElementById('projPresets');
   pwrap.innerHTML = '';
-  Object.entries(labels).forEach(([key,label])=>{
+  Object.entries(PRESET_LABELS).forEach(([key,label])=>{
     const btn = document.createElement('button');
     btn.textContent = label;
     if(key===activeKey) btn.classList.add('active');
@@ -457,20 +426,25 @@ function renderProjection(){
   document.getElementById('projChart').innerHTML = buildYearChartSVG(monthlyNet);
 }
 
-/* ---------- Goal-seek: driver-operated only for now ---------- */
-// Solves backwards from a target yearly income to the hours/week it would take, holding
-// the currently-entered fare/split/cost-per-km/speed steady. Not yet extended to passive
-// mode, since "hours driven" isn't a meaningful input there — take rate and utilization are.
+/* ---------- Goal-seek ----------
+   Solves backwards from a target yearly income to the hours/week it would take,
+   holding the currently-entered fare/split/cost-per-km/speed steady. Works the
+   same way in both modes now that they share one formula — "hours" just means
+   your hours in active mode, or the vehicle's hours in passive mode. */
 function renderGoalSeek(){
   const summaryEl = document.getElementById('goalSummary');
   if(!summaryEl) return;
-  const target = parseFloat(state.rideshare.goalTargetAnnual)||0;
+  const rs = state.rideshare;
+  const passive = !!rs.passive;
+  document.getElementById('goalTargetLabel').textContent = passive ? 'Target annual income from the network' : 'Target annual income from driving';
+
+  const target = parseFloat(rs.goalTargetAnnual)||0;
   if(!target){
-    summaryEl.textContent = 'Enter a target yearly income above to see the hours/week it would take, at your current fare, split, and cost assumptions.';
+    const hoursNoun = passive ? "the vehicle's hours/week on the network" : 'hours/week driving';
+    summaryEl.textContent = `Enter a target yearly income above to see ${hoursNoun} it would take, at your current fare, split, and cost assumptions.`;
     return;
   }
 
-  const rs = state.rideshare;
   const fph = parseFloat(rs.faresPerHour)||0;
   const fare = parseFloat(rs.avgFare)||0;
   const split = (parseFloat(rs.splitPct)||0)/100;
@@ -479,7 +453,7 @@ function renderGoalSeek(){
   const netPerHour = (fph*fare*split) - (mph*cpm);
 
   if(netPerHour<=0){
-    summaryEl.textContent = "At the fare, revenue share, and operating cost you've entered above, every hour driven nets $0 or less — more hours alone can't get you there. Adjust those numbers first, then this will solve for the hours.";
+    summaryEl.textContent = "At the fare, share, and operating cost you've entered above, every hour nets $0 or less — more hours alone can't get you there. Adjust those numbers first, then this will solve for the hours.";
     return;
   }
 
@@ -489,10 +463,19 @@ function renderGoalSeek(){
   const curHours = parseFloat(rs.hoursPerWeek)||0;
   const delta = hoursPerWeek - curHours;
   const deltaPhrase = curHours>0
-    ? ` That's ${delta>=0 ? 'about '+delta.toFixed(1)+' more hrs/week than' : 'about '+Math.abs(delta).toFixed(1)+' fewer hrs/week than'} what's entered above (${curHours} hrs/week).`
+    ? ` That's ${delta>=0 ? 'about '+delta.toFixed(1)+' more than' : 'about '+Math.abs(delta).toFixed(1)+' fewer than'} what's entered above (${curHours} hrs/week).`
     : '';
 
-  summaryEl.textContent = `At $${netPerHour.toFixed(2)} net per hour driven, ${fmt(target)}/yr takes about ${hoursPerWeek.toFixed(1)} hrs/week — roughly ${Math.round(ridesPerWeek)} fares/week, or ${hoursPerDay.toFixed(1)} hrs/day.${deltaPhrase}`;
+  const ceiling = MAX_HOURS_PER_WEEK[passive ? 'passive' : 'active'];
+  let fleetPhrase = '';
+  if(hoursPerWeek > ceiling){
+    const vehicles = Math.ceil(hoursPerWeek/ceiling);
+    fleetPhrase = passive
+      ? ` That's more hours than one vehicle can realistically deliver even close to around-the-clock (~${ceiling}/week max) — getting there would take roughly ${vehicles} vehicles running in parallel, not just one.`
+      : ` That's more than one person can sustainably drive (~${ceiling}/week is already a demanding full-time hustle) — getting there realistically means a second driver or vehicle, not just more hours from one person.`;
+  }
+
+  summaryEl.textContent = `At $${netPerHour.toFixed(2)} net per hour, ${fmt(target)}/yr takes about ${hoursPerWeek.toFixed(1)} hrs/week — roughly ${Math.round(ridesPerWeek)} fares/week, or ${hoursPerDay.toFixed(1)} hrs/day.${deltaPhrase}${fleetPhrase}`;
 }
 document.getElementById('goalTarget').addEventListener('input', e=>{
   state.rideshare.goalTargetAnnual = e.target.value;
@@ -502,49 +485,42 @@ document.getElementById('goalTarget').addEventListener('input', e=>{
 
 function renderRideshareFields(){
   const rs = state.rideshare;
-  document.getElementById('activeBlock').style.display = rs.passive ? 'none' : 'block';
-  document.getElementById('passiveBlock').style.display = rs.passive ? 'block' : 'none';
   document.getElementById('goalTarget').value = rs.goalTargetAnnual || '';
+
+  const pwrap = document.getElementById('rsPresets');
+  pwrap.innerHTML = '';
+  Object.entries(PRESET_LABELS).forEach(([key,label])=>{
+    const btn = document.createElement('button');
+    btn.textContent = label;
+    if(key===rs.preset) btn.classList.add('active');
+    btn.addEventListener('click', ()=>{
+      const table = rs.passive ? PASSIVE_PRESETS : ACTIVE_PRESETS;
+      Object.assign(rs, table[key]);
+      rs.preset = key;
+      renderRideshareFields();
+      save(); compute();
+    });
+    pwrap.appendChild(btn);
+  });
 
   const wrap = document.getElementById('rsFields');
   wrap.innerHTML = '';
   RS_FIELDS.forEach(([key,label,unit])=>{
     const row = document.createElement('div');
     row.className = 'field';
-    row.innerHTML = `<label>${label}</label><input type="number" step="any" value="${rs[key]}"><span class="unit">${unit}</span>`;
+    const rowLabel = key==='hoursPerWeek' ? hoursFieldLabel(rs.passive) : label;
+    row.innerHTML = `<label>${rowLabel}</label><input type="number" step="any" value="${rs[key]}"><span class="unit">${unit}</span>`;
     row.querySelector('input').addEventListener('input', e=>{
       rs[key] = e.target.value; save(); compute();
     });
     wrap.appendChild(row);
   });
 
-  const pwrap = document.getElementById('passiveFields');
-  pwrap.innerHTML = '';
-  PASSIVE_FIELDS.forEach(([key,label,unit])=>{
-    const row = document.createElement('div');
-    row.className = 'field';
-    row.innerHTML = `<label>${label}</label><input type="number" step="any" value="${rs[key]}"><span class="unit">${unit}</span>`;
-    row.querySelector('input').addEventListener('input', e=>{
-      rs[key] = e.target.value; save(); compute();
-    });
-    pwrap.appendChild(row);
-  });
-
   document.getElementById('passiveMode').checked = !!rs.passive;
 }
 
-function computeRideshare(costData){
+function computeRideshare(){
   const rs = state.rideshare;
-
-  if(rs.passive){
-    const take = parseFloat(rs.takeRatePct)||0;
-    const util = parseFloat(rs.utilizationPctDay)||0;
-    const baseAnnual = passiveNetAnnualAtBaseline(take);
-    const scaledAnnual = baseAnnual * (util/35); // scale from the 35%-utilization baseline
-    const netMonthly = scaledAnnual/12;
-    return {netWeekly: netMonthly/4.333, netMonthly};
-  }
-
   const hours = parseFloat(rs.hoursPerWeek)||0;
   const fph = parseFloat(rs.faresPerHour)||0;
   const fare = parseFloat(rs.avgFare)||0;
@@ -553,10 +529,10 @@ function computeRideshare(costData){
   const mph = parseFloat(rs.avgMph)||0;
 
   const grossWeekly = hours * fph * fare;
-  const driverShareWeekly = grossWeekly * split;
+  const shareWeekly = grossWeekly * split;
   const milesWeekly = hours * mph;
   const opCostWeekly = milesWeekly * cpm;
-  const netWeekly = driverShareWeekly - opCostWeekly;
+  const netWeekly = shareWeekly - opCostWeekly;
   const netMonthly = netWeekly * 4.333;
 
   return {netWeekly, netMonthly};
@@ -612,7 +588,7 @@ function compute(){
   deltaEl.textContent = (costData.delta<=0?'':'+') + fmt(costData.delta) + '/mo';
   deltaEl.className = 'val ' + (costData.delta<=0?'good':costData.delta<150?'warn':'bad');
 
-  const rsData = computeRideshare(costData);
+  const rsData = computeRideshare();
   document.getElementById('rsWeekly').textContent = fmt(rsData.netWeekly);
   document.getElementById('rsMonthly').textContent = fmt(rsData.netMonthly);
   const covers = rsData.netMonthly >= costData.pmt && costData.pmt>0;
@@ -638,32 +614,13 @@ function init(){
     save(); compute();
   });
 
-  document.querySelectorAll('#activeBlock .presets button').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      document.querySelectorAll('#activeBlock .presets button').forEach(b=>b.classList.remove('active'));
-      btn.classList.add('active');
-      const p = PRESETS[btn.dataset.p];
-      Object.assign(state.rideshare, p);
-      state.rideshare.preset = btn.dataset.p;
-      renderRideshareFields();
-      save(); compute();
-    });
-  });
-
-  document.querySelectorAll('#passiveBlock .presets button').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      document.querySelectorAll('#passiveBlock .presets button').forEach(b=>b.classList.remove('active'));
-      btn.classList.add('active');
-      const p = PASSIVE_PRESETS[btn.dataset.p2];
-      Object.assign(state.rideshare, p);
-      state.rideshare.passivePreset = btn.dataset.p2;
-      renderRideshareFields();
-      save(); compute();
-    });
-  });
-
   document.getElementById('passiveMode').addEventListener('change', e=>{
-    state.rideshare.passive = e.target.checked;
+    const rs = state.rideshare;
+    rs.passive = e.target.checked;
+    // Re-apply the current preset tier's hours/cost for the new mode, rather than
+    // leaving stale numbers from the other mode sitting in the hours/cost fields.
+    const table = rs.passive ? PASSIVE_PRESETS : ACTIVE_PRESETS;
+    Object.assign(rs, table[rs.preset] || table.moderate);
     renderRideshareFields();
     save(); compute();
   });
