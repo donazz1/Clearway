@@ -394,12 +394,14 @@
             <h3>Log an entry</h3>
             <div class="log-form">
               <div class="field-labeled"><label>Date</label><input type="date" id="logDate"></div>
+              <div class="field-labeled"><label>Merchant</label><input type="text" id="logMerchant" placeholder="e.g. Shell, Sobeys"></div>
               <div class="field-labeled">
                 <label>Bucket</label>
                 <select id="logBucket"></select>
               </div>
               <div class="field-labeled"><label>Amount</label><input type="text" id="logAmount" placeholder="0"></div>
-              <div class="field-labeled" style="grid-column:1 / -1;"><label>Note</label><input type="text" id="logNote" placeholder="e.g. Friday night fares, gas fill-up"></div>
+              <div class="field-labeled"><label>Tax (optional)</label><input type="text" id="logTax" placeholder="0"></div>
+              <div class="field-labeled" style="grid-column:1 / -1;"><label>Note (optional)</label><input type="text" id="logNote" placeholder="e.g. Friday night fares, oil change too"></div>
             </div>
             <div style="margin-top:12px;"><button class="btn primary" onclick="addLogEntry()">Add entry</button></div>
           </div>
@@ -410,6 +412,11 @@
               <select id="logFilter" style="padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--paper);font-size:13px;"></select>
             </div>
             <div id="logList"></div>
+          </div>
+
+          <div class="card">
+            <h3>By merchant</h3>
+            <div id="merchantBreakdown"></div>
           </div>
         </section>
 
@@ -634,7 +641,7 @@
 const PLAIN_KEY = 'clearway-data-v2';
 const VAULT_KEY = 'clearway-vault-v1';
 
-const DEFAULT_CATEGORIES = ['Housing','Transportation','Food & Groceries','Utilities','Insurance','Debt Payments','Subscriptions','Savings & Investing','Personal & Fun','Other'];
+const DEFAULT_CATEGORIES = ['Housing','Transportation','Food & Groceries','Dining Out','Utilities','Insurance','Debt Payments','Subscriptions','Savings & Investing','Personal & Fun','Other'];
 const FREQ = {monthly:1, weekly:4.333, biweekly:2.166, yearly:1/12};
 
 function blankState(){
@@ -1160,43 +1167,79 @@ function renderLogList(){
   const entries = state.log.filter(e => filter==='all' || monthKeyOf(e.date)===filter)
     .slice().sort((a,b)=> (b.date||'').localeCompare(a.date||''));
 
-  if(entries.length===0){ listEl.innerHTML = '<div class="log-empty">No entries yet. Log a fare, a fill-up, anything dated.</div>'; return; }
+  if(entries.length===0){ listEl.innerHTML = '<div class="log-empty">No entries yet. Log a fare, a fill-up, anything dated.</div>'; }
+  else {
+    const groups = {};
+    entries.forEach(e=>{ const k=monthKeyOf(e.date); (groups[k]=groups[k]||[]).push(e); });
 
-  const groups = {};
-  entries.forEach(e=>{ const k=monthKeyOf(e.date); (groups[k]=groups[k]||[]).push(e); });
-
-  listEl.innerHTML = Object.keys(groups).sort().reverse().map(ym=>{
-    const rows = groups[ym].map(e=>{
-      const isIncome = e.bucket==='Income';
-      return `
-        <div class="log-entry">
-          <span class="le-date">${(e.date||'').slice(5)}</span>
-          <span class="le-bucket ${isIncome?'income':'expense'}">${escapeAttr(e.bucket)}</span>
-          <span class="le-note">${escapeAttr(e.note||'')}</span>
-          <span class="le-amt ${isIncome?'income':'expense'}">${isIncome?'+':'-'}${fmt(Math.abs(parseFloat(e.amount)||0))}</span>
-          <button class="le-del" data-id="${e.id}" title="Remove">×</button>
-        </div>`;
+    listEl.innerHTML = Object.keys(groups).sort().reverse().map(ym=>{
+      const rows = groups[ym].map(e=>{
+        const isIncome = e.bucket==='Income';
+        const taxNote = e.tax ? ` <span style="color:var(--ink-soft);font-size:11px;">(incl. ${fmt(e.tax)} tax)</span>` : '';
+        const primary = e.merchant || e.note || '—';
+        const secondary = (e.merchant && e.note) ? ` <span style="color:var(--ink-soft);">— ${escapeAttr(e.note)}</span>` : '';
+        return `
+          <div class="log-entry">
+            <span class="le-date">${(e.date||'').slice(5)}</span>
+            <span class="le-bucket ${isIncome?'income':'expense'}">${escapeAttr(e.bucket)}</span>
+            <span class="le-note"><strong>${escapeAttr(primary)}</strong>${secondary}${taxNote}</span>
+            <span class="le-amt ${isIncome?'income':'expense'}">${isIncome?'+':'-'}${fmt(Math.abs(parseFloat(e.amount)||0))}</span>
+            <button class="le-del" data-id="${e.id}" title="Remove">×</button>
+          </div>`;
+      }).join('');
+      return `<div class="log-month-group"><div class="log-month-head">${monthLabel(ym)}</div>${rows}</div>`;
     }).join('');
-    return `<div class="log-month-group"><div class="log-month-head">${monthLabel(ym)}</div>${rows}</div>`;
-  }).join('');
 
-  listEl.querySelectorAll('.le-del').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      state.log = state.log.filter(e=>e.id!==btn.dataset.id);
-      saveLocal(); renderLogList(); if(currentView==='yearview') renderYearView();
+    listEl.querySelectorAll('.le-del').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        state.log = state.log.filter(e=>e.id!==btn.dataset.id);
+        saveLocal(); renderLogList(); if(currentView==='yearview') renderYearView();
+      });
     });
+  }
+
+  renderMerchantBreakdown(entries);
+}
+
+function renderMerchantBreakdown(entries){
+  const el = document.getElementById('merchantBreakdown');
+  if(!el) return;
+
+  const byMerchant = {};
+  entries.filter(e => e.merchant && e.merchant.trim()).forEach(e=>{
+    const key = e.merchant.trim().toLowerCase();
+    if(!byMerchant[key]) byMerchant[key] = { label: e.merchant.trim(), total: 0, count: 0, isIncome: e.bucket==='Income' };
+    byMerchant[key].total += Math.abs(parseFloat(e.amount)||0);
+    byMerchant[key].count += 1;
   });
+
+  const rows = Object.values(byMerchant).sort((a,b)=>b.total-a.total);
+  if(rows.length===0){ el.innerHTML = '<div class="log-empty">Log a few entries with a merchant name to see totals here.</div>'; return; }
+
+  const max = Math.max(...rows.map(r=>r.total));
+  el.innerHTML = rows.map(r=>`
+    <div class="bd-row">
+      <div class="lbl">${escapeAttr(r.label)} <span style="color:var(--ink-soft);">(${r.count})</span></div>
+      <div class="track"><div style="width:${Math.max(4,(r.total/max*100))}%;background:${r.isIncome?'var(--good)':'var(--accent)'}"></div></div>
+      <div class="amt">${fmt(r.total)}</div>
+    </div>
+  `).join('');
 }
 
 function addLogEntry(){
   const date = document.getElementById('logDate').value || todayISO();
   const bucket = document.getElementById('logBucket').value;
   const amount = parseFloat(document.getElementById('logAmount').value);
+  const tax = parseFloat(document.getElementById('logTax').value) || null;
+  const merchant = document.getElementById('logMerchant').value.trim();
   const note = document.getElementById('logNote').value;
   if(!amount || amount<=0){ showToast('Enter an amount.'); return; }
-  state.log.push({ id: 'l'+Date.now()+Math.random().toString(36).slice(2,7), date, bucket, amount, note });
+  state.log.push({ id: 'l'+Date.now()+Math.random().toString(36).slice(2,7), date, bucket, amount, tax, merchant, note });
   saveLocal();
   document.getElementById('logAmount').value = '';
+  document.getElementById('logTax').value = '';
+  document.getElementById('logMerchant').value = '';
+  document.getElementById('logNote').value = '';
   document.getElementById('logNote').value = '';
   renderLogList();
   showToast('Logged.');
@@ -1217,44 +1260,79 @@ function lazyLoadTesseract(){
   return tesseractLoadPromise;
 }
 
-// Keyword → default category name. Only applied if that category still exists in state.catOrder.
+// Keyword → default category name. Checked in this order — more specific categories first,
+// so a generic big-box name (e.g. "Costco") can't steal a receipt that's clearly something else.
 const RECEIPT_KEYWORDS = {
-  'Transportation': ['shell','esso','petro','chevron','exxon','mobil','circle k','husky','pioneer','gas station','car wash','auto','tire','mechanic','oil change','parking','uber','lyft'],
-  'Food & Groceries': ['grocery','sobeys','metro','loblaws','walmart','costco','no frills','food basics','superstore','restaurant','cafe','coffee','starbucks','tim hortons','mcdonald','subway','pizza','freshco'],
-  'Utilities': ['hydro','electric','water bill','telus','rogers','bell canada','internet','utility'],
   'Insurance': ['insurance','allstate','state farm','intact','td insurance','desjardins'],
+  'Utilities': ['hydro','electric','water bill','telus','rogers','bell canada','internet','utility'],
   'Subscriptions': ['netflix','spotify','apple.com','amazon prime','disney+','subscription'],
+  'Transportation': ['shell','esso','petro','chevron','exxon','mobil','circle k','husky','pioneer','gas station','car wash','auto','tire','mechanic','oil change','parking','uber','lyft'],
   'Housing': ['rent','mortgage','condo fee','home depot','rona','canadian tire','hardware'],
-  'Personal & Fun': ['cinema','movie','theatre','bar','pub','liquor','lcbo','beer store','entertainment']
+  'Personal & Fun': ['cinema','movie','theatre','bar','pub','liquor','lcbo','beer store','entertainment'],
+  'Dining Out': ['restaurant','cafe','coffee','starbucks','tim hortons','mcdonald','subway','pizza','diner','bistro','grill','eatery','breakfast','brunch','doordash','uber eats','skipthedishes','grubhub','takeout','take-out','delivery'],
+  'Food & Groceries': ['grocery','sobeys','metro','loblaws','walmart','costco','no frills','food basics','superstore','freshco']
 };
+
+// Pharmacy/medical receipts get checked FIRST and independently — these often contain a
+// big-box store name (e.g. "Costco Pharmacy") that would otherwise wrongly match groceries.
+const PHARMACY_SIGNALS = ['pharmacy','prescription','dispensing fee','patient pays','rx:','din:','shoppers drug mart','rexall','walk-in clinic','ontario drug benefit','apo-'];
+
+// Phrases that indicate "what was actually paid", checked in priority order — always
+// ahead of a generic "total", since a total can be the pre-insurance amount, or (on a
+// restaurant bill) the pre-tip amount — the card-sale line is the true final charge.
+const AMOUNT_PRIORITY_KEYWORDS = ['debit card sale','credit card sale','card sale','amount charged','patient pays','patient pay','you pay','amount due','amount paid','balance due','copay'];
+
+function guessBucket(lower){
+  const isPharmacy = PHARMACY_SIGNALS.some(k=>lower.includes(k));
+  if(isPharmacy){
+    const healthCat = state.catOrder.find(c => /health|medical|pharmacy|prescription/i.test(c));
+    return healthCat || null; // don't fall through to a generic store-name match on a medical receipt
+  }
+  for(const [cat, keywords] of Object.entries(RECEIPT_KEYWORDS)){
+    if(state.catOrder.includes(cat) && keywords.some(k=>lower.includes(k))) return cat;
+  }
+  return null;
+}
 
 function parseReceiptText(text){
   const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
   const lower = text.toLowerCase();
-
-  // Amount: prefer a line containing "total", else the largest $-looking number
   const amountRe = /\$?\s?(\d{1,4}[.,]\d{2})\b/g;
+
+  // Amount: what-you-actually-paid keywords win over a generic "total" (insurance may cover
+  // most of it, or a tip may sit after the total) — if nothing keyword-based is found, leave
+  // it blank rather than guessing from the largest number on the page (DINs, doctor IDs, etc).
   let amount = null;
-  const totalLine = lines.find(l => /total/i.test(l) && !/subtotal/i.test(l));
-  if(totalLine){
-    const m = totalLine.match(amountRe);
+  let matchedLine = null;
+  for(const kw of AMOUNT_PRIORITY_KEYWORDS){
+    matchedLine = lines.find(l => l.toLowerCase().includes(kw));
+    if(matchedLine) break;
+  }
+  if(!matchedLine){
+    matchedLine = lines.find(l => /total/i.test(l) && !/subtotal/i.test(l));
+  }
+  if(matchedLine){
+    const m = matchedLine.match(amountRe);
     if(m) amount = parseFloat(m[m.length-1].replace(/[^0-9.]/g,''));
   }
-  if(amount===null){
-    const all = [...text.matchAll(amountRe)].map(m=>parseFloat(m[1].replace(',','.')));
-    if(all.length) amount = Math.max(...all);
+
+  // Tax: HST/GST/PST/VAT line, kept separate from the amount — informational, not required
+  let tax = null;
+  const taxLine = lines.find(l => /\b(hst|gst|pst|vat|tax)\b/i.test(l) && !/subtotal/i.test(l));
+  if(taxLine){
+    const m = taxLine.match(amountRe);
+    if(m) tax = parseFloat(m[m.length-1].replace(/[^0-9.]/g,''));
   }
 
-  // Merchant: first substantial line that looks like real text, not OCR noise/symbols
-  const merchant = lines.find(l => l.length>=3 && !/^\d+$/.test(l) && /[a-zA-Z]{2,}/.test(l)) || '';
+  // Merchant: first substantial line that looks like real text — skipping generic
+  // receipt-header boilerplate that isn't actually the business name.
+  const GENERIC_RECEIPT_HEADERS = /^(transaction record|receipt|tax invoice|sales receipt|invoice|order confirmation|customer copy|merchant copy|official (prescription )?receipt)$/i;
+  const merchantCandidates = lines.filter(l => l.length>=3 && !/^\d+$/.test(l) && /[a-zA-Z]{2,}/.test(l));
+  const merchant = merchantCandidates.find(l => !GENERIC_RECEIPT_HEADERS.test(l.trim())) || merchantCandidates[0] || '';
 
-  // Bucket guess
-  let bucket = null;
-  for(const [cat, keywords] of Object.entries(RECEIPT_KEYWORDS)){
-    if(state.catOrder.includes(cat) && keywords.some(k=>lower.includes(k))){ bucket = cat; break; }
-  }
+  const bucket = guessBucket(lower);
 
-  return { amount, merchant, bucket, rawText: text };
+  return { amount, tax, merchant, bucket, rawText: text };
 }
 
 function setReceiptStatus(html){
@@ -1280,13 +1358,15 @@ async function handleReceiptFile(file){
     const parsed = parseReceiptText(text);
 
     if(parsed.amount) document.getElementById('logAmount').value = parsed.amount.toFixed(2);
-    if(parsed.merchant) document.getElementById('logNote').value = parsed.merchant;
+    if(parsed.tax) document.getElementById('logTax').value = parsed.tax.toFixed(2);
+    if(parsed.merchant) document.getElementById('logMerchant').value = parsed.merchant;
     if(parsed.bucket) document.getElementById('logBucket').value = parsed.bucket;
 
     const statusText = document.getElementById('receiptStatusText');
     const found = [], missing = [];
     if(parsed.amount) found.push('amount'); else missing.push('amount');
-    if(parsed.merchant) found.push('description'); else missing.push('description');
+    if(parsed.tax) found.push('tax');
+    if(parsed.merchant) found.push('merchant'); else missing.push('merchant');
     if(parsed.bucket) found.push('category'); else missing.push('category');
 
     if(found.length===0){
@@ -1294,7 +1374,7 @@ async function handleReceiptFile(file){
       statusText.textContent = "Couldn't make out anything useful — enter it manually below.";
     } else if(missing.length===0){
       statusText.className = 'receipt-status-text ready';
-      statusText.textContent = 'Got the amount, description, and category — check them, then tap Add entry.';
+      statusText.textContent = 'Got the amount, merchant, and category — check them, then tap Add entry.';
     } else {
       statusText.className = 'receipt-status-text ready';
       statusText.textContent = `Got the ${found.join(' and ')}. Couldn't tell the ${missing.join(' or ')} — fill that in below.`;
