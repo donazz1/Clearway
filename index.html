@@ -675,6 +675,26 @@
 <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
 <script>
 /* =========================================================
+   Auto-update: iOS "Add to Home Screen" apps run as a suspended process that gets
+   resumed (not reloaded) when reopened, so a normal page load may never actually
+   happen again after the first install. Every time this tab becomes visible, check
+   whether the server's copy is newer than what's currently running, and if so, force
+   a real reload — this is how it stays current without anyone having to force-quit
+   the app to find out whether they're looking at old code.
+   ========================================================= */
+async function checkForNewVersion(){
+  try{
+    const res = await fetch(location.pathname + '?_v=' + Date.now(), {method:'HEAD', cache:'no-store'});
+    const serverLastModified = res.headers.get('last-modified');
+    if(serverLastModified && new Date(serverLastModified).getTime() > new Date(document.lastModified).getTime()){
+      location.reload();
+    }
+  }catch(e){ /* offline, or the request was blocked — just skip this check silently */ }
+}
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') checkForNewVersion(); });
+window.addEventListener('pageshow', e=>{ if(e.persisted) checkForNewVersion(); });
+
+/* =========================================================
    Storage model
    - PLAIN_KEY: unencrypted state, used when no password is set
    - VAULT_KEY: encrypted blob {salt, iv, data}, used when a password is set
