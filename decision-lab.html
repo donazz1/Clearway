@@ -103,6 +103,9 @@
 
   .assumptions{margin-top:16px;padding-top:14px;border-top:1px solid var(--line);}
   .assumptions summary{font-size:12px;color:var(--ink-soft);cursor:pointer;font-weight:600;}
+  .projection summary{font-size:13px;color:var(--ink);}
+  .proj-summary{font-size:12px;color:var(--ink-soft);margin-bottom:10px;}
+  .proj-chart-wrap{background:var(--paper);border-radius:10px;padding:10px 4px 2px;}
 
   @media print{
     body{padding-bottom:0;} a.back{display:none;}
@@ -173,6 +176,18 @@
           <button data-p="optimistic">Optimistic</button>
         </div>
         <div id="rsFields"></div>
+
+        <details class="assumptions projection">
+          <summary>Reverse-solve: aim for a target income</summary>
+          <div style="margin-top:12px;">
+            <div class="field" style="border-bottom:none;">
+              <label>Target annual income from driving</label>
+              <input type="number" step="any" id="goalTarget"><span class="unit">$/yr</span>
+            </div>
+            <div class="proj-summary" id="goalSummary"></div>
+          </div>
+        </details>
+
         <details class="assumptions">
           <summary>How this is calculated</summary>
           <div style="font-size:12px;color:var(--ink-soft);margin-top:8px;line-height:1.7;">
@@ -198,6 +213,15 @@
         <div class="rs-card"><div class="k">Monthly net</div><div class="v" id="rsMonthly">$0</div></div>
         <div class="rs-card"><div class="k">Covers car payment?</div><div class="v" id="rsCovers">—</div></div>
       </div>
+
+      <details class="assumptions projection">
+        <summary>12-month projection, graphed</summary>
+        <div style="margin-top:12px;">
+          <div class="presets" id="projPresets"></div>
+          <div class="proj-summary" id="projSummary"></div>
+          <div class="proj-chart-wrap"><div id="projChart"></div></div>
+        </div>
+      </details>
     </div>
   </div>
 
@@ -240,7 +264,8 @@ function defaultState(){
       avgMph: 22,
       passivePreset: 'balanced',
       takeRatePct: 35,
-      utilizationPctDay: 35
+      utilizationPctDay: 35,
+      goalTargetAnnual: ''
     }
   };
 }
@@ -364,10 +389,122 @@ function passiveNetAnnualAtBaseline(takeRate){
   return pts[1][1];
 }
 
+/* ---------- 12-month projection chart ---------- */
+// Independent of the live-edited fields above — always computed from the canned presets,
+// so flipping through Conservative/Moderate/Optimistic here is a quick side-by-side,
+// not tied to whatever custom numbers are currently in the fields.
+let projActiveKey = 'moderate';
+let projPassiveKey = 'balanced';
+
+function computeRideshareForPreset(passive, key){
+  if(passive){
+    const ov = PASSIVE_PRESETS[key];
+    const util = parseFloat(state.rideshare.utilizationPctDay)||35;
+    const baseAnnual = passiveNetAnnualAtBaseline(ov.takeRatePct);
+    return (baseAnnual * (util/35)) / 12;
+  }
+  const p = PRESETS[key];
+  const grossWeekly = p.hoursPerWeek * p.faresPerHour * p.avgFare;
+  const driverShareWeekly = grossWeekly * (p.splitPct/100);
+  const opCostWeekly = p.hoursPerWeek * p.avgMph * p.costPerMile;
+  return (driverShareWeekly - opCostWeekly) * 4.333;
+}
+
+function buildYearChartSVG(monthlyNet){
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const cumulative = months.map((_,i)=> monthlyNet*(i+1));
+  const maxVal = Math.max(1, Math.abs(cumulative[cumulative.length-1]));
+  const W=680, H=180, padT=10, padB=22, barGap=6;
+  const chartH = H - padT - padB;
+  const barW = (W - barGap*(months.length-1)) / months.length;
+  const zeroY = padT + chartH;
+  let bars = '';
+  cumulative.forEach((val,i)=>{
+    const h = Math.max(2, (Math.abs(val)/maxVal)*chartH);
+    const x = i*(barW+barGap);
+    const y = val>=0 ? (zeroY-h) : zeroY;
+    const color = val>=0 ? 'var(--good)' : 'var(--bad)';
+    bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="3" fill="${color}"></rect>`;
+    bars += `<text x="${(x+barW/2).toFixed(1)}" y="${H-6}" font-size="9" fill="var(--ink-soft)" text-anchor="middle">${months[i]}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;">${bars}</svg>`;
+}
+
+function renderProjection(){
+  const passive = !!state.rideshare.passive;
+  const labels = passive
+    ? {tesla_favored:'Tesla takes more (50%)', balanced:'Balanced (35%)', owner_favored:'Owner takes more (15%)'}
+    : {conservative:'Conservative', moderate:'Moderate', optimistic:'Optimistic'};
+  const activeKey = passive ? projPassiveKey : projActiveKey;
+
+  const pwrap = document.getElementById('projPresets');
+  pwrap.innerHTML = '';
+  Object.entries(labels).forEach(([key,label])=>{
+    const btn = document.createElement('button');
+    btn.textContent = label;
+    if(key===activeKey) btn.classList.add('active');
+    btn.addEventListener('click', ()=>{
+      if(passive) projPassiveKey = key; else projActiveKey = key;
+      renderProjection();
+    });
+    pwrap.appendChild(btn);
+  });
+
+  const monthlyNet = computeRideshareForPreset(passive, activeKey);
+  const yearTotal = monthlyNet*12;
+  document.getElementById('projSummary').textContent =
+    `At a steady ${fmt(monthlyNet)}/mo for this scenario, that's ${fmt(yearTotal)} over 12 months.`;
+  document.getElementById('projChart').innerHTML = buildYearChartSVG(monthlyNet);
+}
+
+/* ---------- Goal-seek: driver-operated only for now ---------- */
+// Solves backwards from a target yearly income to the hours/week it would take, holding
+// the currently-entered fare/split/cost-per-km/speed steady. Not yet extended to passive
+// mode, since "hours driven" isn't a meaningful input there — take rate and utilization are.
+function renderGoalSeek(){
+  const summaryEl = document.getElementById('goalSummary');
+  if(!summaryEl) return;
+  const target = parseFloat(state.rideshare.goalTargetAnnual)||0;
+  if(!target){
+    summaryEl.textContent = 'Enter a target yearly income above to see the hours/week it would take, at your current fare, split, and cost assumptions.';
+    return;
+  }
+
+  const rs = state.rideshare;
+  const fph = parseFloat(rs.faresPerHour)||0;
+  const fare = parseFloat(rs.avgFare)||0;
+  const split = (parseFloat(rs.splitPct)||0)/100;
+  const cpm = parseFloat(rs.costPerMile)||0;
+  const mph = parseFloat(rs.avgMph)||0;
+  const netPerHour = (fph*fare*split) - (mph*cpm);
+
+  if(netPerHour<=0){
+    summaryEl.textContent = "At the fare, revenue share, and operating cost you've entered above, every hour driven nets $0 or less — more hours alone can't get you there. Adjust those numbers first, then this will solve for the hours.";
+    return;
+  }
+
+  const hoursPerWeek = (target/52) / netPerHour;
+  const ridesPerWeek = hoursPerWeek * fph;
+  const hoursPerDay = hoursPerWeek / 7;
+  const curHours = parseFloat(rs.hoursPerWeek)||0;
+  const delta = hoursPerWeek - curHours;
+  const deltaPhrase = curHours>0
+    ? ` That's ${delta>=0 ? 'about '+delta.toFixed(1)+' more hrs/week than' : 'about '+Math.abs(delta).toFixed(1)+' fewer hrs/week than'} what's entered above (${curHours} hrs/week).`
+    : '';
+
+  summaryEl.textContent = `At $${netPerHour.toFixed(2)} net per hour driven, ${fmt(target)}/yr takes about ${hoursPerWeek.toFixed(1)} hrs/week — roughly ${Math.round(ridesPerWeek)} fares/week, or ${hoursPerDay.toFixed(1)} hrs/day.${deltaPhrase}`;
+}
+document.getElementById('goalTarget').addEventListener('input', e=>{
+  state.rideshare.goalTargetAnnual = e.target.value;
+  save();
+  renderGoalSeek();
+});
+
 function renderRideshareFields(){
   const rs = state.rideshare;
   document.getElementById('activeBlock').style.display = rs.passive ? 'none' : 'block';
   document.getElementById('passiveBlock').style.display = rs.passive ? 'block' : 'none';
+  document.getElementById('goalTarget').value = rs.goalTargetAnnual || '';
 
   const wrap = document.getElementById('rsFields');
   wrap.innerHTML = '';
@@ -482,6 +619,8 @@ function compute(){
   document.getElementById('rsCovers').textContent = costData.pmt>0 ? (covers?'Yes':'Not quite') : '—';
 
   computeVerdict(costData, rsData);
+  renderProjection();
+  renderGoalSeek();
 }
 
 /* ---------- Init ---------- */

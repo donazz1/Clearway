@@ -28,26 +28,41 @@
     -webkit-font-smoothing:antialiased; overscroll-behavior:none;
   }
 
-  /* ---------- Lock screen ---------- */
-  #lockScreen{
+  /* ---------- Auth screen / lock screen ---------- */
+  #authScreen,#lockScreen{
     position:fixed;inset:0;background:var(--sidebar-bg);color:var(--sidebar-ink);
     display:none;align-items:center;justify-content:center;padding:24px;z-index:200;
     padding-top:calc(24px + var(--safe-top));
   }
-  #lockScreen.show{display:flex;}
+  #authScreen.show,#lockScreen.show{display:flex;}
   .lock-card{max-width:340px;width:100%;text-align:center;}
+  #authScreen .lock-card{animation:authIn .55s ease;}
+  @keyframes authIn{ from{opacity:0;transform:translateY(8px);} to{opacity:1;transform:translateY(0);} }
+  .auth-hero{width:84px;height:84px;margin:0 auto 16px;position:relative;display:flex;align-items:center;justify-content:center;}
+  .auth-hero::before{
+    content:"";position:absolute;inset:-16px;border-radius:50%;
+    background:radial-gradient(circle, rgba(62,107,84,.4) 0%, rgba(62,107,84,0) 70%);
+    animation:authGlow 3.5s ease-in-out infinite;
+  }
+  .auth-hero svg{position:relative;width:60px;height:60px;}
+  @keyframes authGlow{ 0%,100%{opacity:.6;transform:scale(1);} 50%{opacity:1;transform:scale(1.08);} }
   .lock-card .mark{font-family:var(--serif);font-size:30px;font-weight:600;margin-bottom:6px;}
   .lock-card .sub{font-size:13px;color:var(--sidebar-soft);margin-bottom:24px;}
-  .lock-card input[type=password]{
+  .lock-card input[type=password], .lock-card input[type=email]{
     width:100%;padding:14px 16px;border-radius:12px;border:1px solid #3A4536;background:#2A332580;
     color:#fff;font-size:16px;text-align:center;letter-spacing:.05em;
   }
-  .lock-card input[type=password]:focus{outline:2px solid var(--good);}
+  .lock-card input[type=password]+input[type=password], .lock-card input[type=email]+input[type=password]{margin-top:10px;}
+  .lock-card input[type=password]:focus, .lock-card input[type=email]:focus{outline:2px solid var(--good);}
   .lock-card button{
     width:100%;margin-top:12px;padding:14px;border-radius:12px;border:none;
     background:var(--good);color:#fff;font-size:15px;font-weight:600;cursor:pointer;
   }
+  .lock-card button.linklike{
+    background:none;color:var(--sidebar-soft);font-size:13px;font-weight:400;padding:8px;margin-top:6px;text-decoration:underline;
+  }
   .lock-card .err{color:#E29B8F;font-size:13px;margin-top:12px;min-height:16px;}
+  .lock-card .ok{color:#A9D4B8;font-size:13px;margin-top:12px;min-height:16px;}
 
   /* ---------- App shell ---------- */
   #app{display:none;height:100%;}
@@ -114,17 +129,7 @@
     font-size:13px;font-weight:600;padding:9px 14px;border-radius:9px;cursor:pointer;
   }
   .btn.primary{background:var(--ink);color:#fff;border-color:var(--ink);}
-  .btn.warn-active{background:var(--warn);border-color:var(--warn);color:#fff;}
   .btn:hover{opacity:.85;}
-
-  .whatif-banner{
-    display:none;align-items:center;justify-content:space-between;gap:10px;
-    background:var(--warn-soft);border:1px dashed var(--warn);color:#7A5A17;
-    padding:10px 14px;border-radius:12px;font-size:13px;margin-bottom:16px;flex-wrap:wrap;
-  }
-  .whatif-banner.show{display:flex;}
-  .whatif-banner button{background:var(--ink);color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:12px;cursor:pointer;}
-  .whatif-banner .discard{background:none;color:#7A5A17;text-decoration:underline;padding:6px 4px;}
 
   /* Overview hero */
   .hero{padding:26px;border-radius:18px;background:var(--paper-raised);border:1px solid var(--line);margin-bottom:16px;}
@@ -212,7 +217,7 @@
   @media(max-width:520px){.field-grid{grid-template-columns:1fr;}}
   .field-labeled{margin-bottom:4px;}
   .field-labeled label{display:block;font-size:12px;color:var(--ink-soft);margin-bottom:5px;font-weight:600;}
-  .field-labeled input[type=text], .field-labeled input[type=password], .field-labeled select{
+  .field-labeled input[type=text], .field-labeled input[type=password], .field-labeled input[type=email], .field-labeled select{
     width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--paper);font-size:14px;color:var(--ink);
   }
   .field-labeled input:focus, .field-labeled select:focus{outline:1px solid var(--focus);}
@@ -256,7 +261,7 @@
   }
 
   @media print{
-    .sidebar,.topbar,.add-row,.row .del,.install-hint,.modal-bg,.whatif-banner,.view-head .actions,#lockScreen{display:none !important;}
+    .sidebar,.topbar,.add-row,.row .del,.install-hint,.modal-bg,.view-head .actions,#lockScreen,#authScreen{display:none !important;}
     .content-wrap{height:auto;}
     .view{display:block !important;}
     .card,.hero{border:none;break-inside:avoid;}
@@ -265,14 +270,49 @@
 </head>
 <body>
 
-<!-- LOCK SCREEN -->
+<!-- ACCOUNT SIGN-IN / SIGN-UP -->
+<div id="authScreen">
+  <div class="lock-card">
+    <div class="auth-hero">
+      <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="32" cy="32" r="29" stroke="var(--good)" stroke-opacity="0.35" stroke-width="1.5"/>
+        <path d="M15 40 L25 29 L33 35 L49 17" stroke="var(--good)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="49" cy="17" r="4" fill="var(--good)"/>
+      </svg>
+    </div>
+    <div class="mark">Clearway</div>
+    <div class="sub" id="authSub">Sign in to sync your budget across every device.</div>
+    <input type="email" id="authEmail" placeholder="Email" autocomplete="email">
+    <input type="password" id="authPassword" placeholder="Password" autocomplete="current-password">
+    <button id="authSubmitBtn">Sign in</button>
+    <button class="linklike" id="authToggleBtn">Need an account? Sign up</button>
+    <button class="linklike" id="authForgotBtn">Forgot password?</button>
+    <div class="err" id="authErr"></div>
+    <div class="ok" id="authOk"></div>
+  </div>
+</div>
+
+<!-- LOCK SCREEN (on-device re-lock, separate from account sign-in above) -->
 <div id="lockScreen">
   <div class="lock-card">
     <div class="mark">Clearway</div>
     <div class="sub" id="lockSub">This budget is password-protected. Enter the password to open it.</div>
     <input type="password" id="lockInput" placeholder="Password" autocomplete="current-password">
     <button id="lockBtn">Unlock</button>
+    <button class="linklike" id="lockForgotBtn">Forgot this device's password?</button>
     <div class="err" id="lockErr"></div>
+  </div>
+</div>
+
+<!-- FIRST-RUN MIGRATION PROMPT -->
+<div class="modal-bg" id="migrateModal">
+  <div class="modal">
+    <h3>Import this device's data?</h3>
+    <p>This device has existing budget data that isn't in your new account yet. Import it now, or start this account fresh — this device's data stays put either way.</p>
+    <div class="modal-actions">
+      <button id="migrateSkipBtn">Start fresh</button>
+      <button class="primary" id="migrateImportBtn">Import it</button>
+    </div>
   </div>
 </div>
 
@@ -293,26 +333,14 @@
       <div class="topbar">
         <button class="hamburger" id="hamburgerBtn"><span></span></button>
         <div class="ttl" id="topbarTitle">Overview</div>
-        <button class="btn" id="whatifBtnMobile" onclick="enterWhatIf()" style="font-size:12px;padding:7px 10px;">What if…</button>
       </div>
 
       <div class="content">
-
-        <div class="whatif-banner" id="whatifBanner">
-          <span>You're exploring a <strong>what if</strong> — nothing is saved yet.</span>
-          <span style="display:flex;gap:8px;">
-            <button class="discard" id="discardWhatif">Discard</button>
-            <button id="keepWhatif">Keep these changes</button>
-          </span>
-        </div>
 
         <!-- OVERVIEW -->
         <section class="view active" data-view="overview">
           <div class="view-head">
             <h1>Overview</h1>
-            <div class="actions">
-              <button class="btn" id="whatifBtnDesktop" onclick="enterWhatIf()">What if…</button>
-            </div>
           </div>
           <div class="greeting" id="greeting"></div>
           <div class="hero">
@@ -464,6 +492,39 @@
           </div>
 
           <div class="card">
+            <h3>Account</h3>
+            <div class="security-status on" id="accountStatus"></div>
+            <button class="btn" onclick="confirmSignOut()">Sign out</button>
+
+            <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line);">
+              <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">
+                Deleting your account permanently removes your budget from the cloud and can't be undone — a fresh start. This device's local backups (if any) aren't touched.
+              </div>
+              <button class="btn" id="showDeleteAccountBtn" onclick="showDeleteAccountForm()" style="color:var(--bad);border-color:var(--bad);">Delete account</button>
+              <div id="deleteAccountForm" style="display:none;">
+                <div class="field-labeled" style="margin-top:10px;"><label>Confirm your password</label><input type="password" id="deleteAccountPassword"></div>
+                <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+                  <button class="btn" onclick="hideDeleteAccountForm()">Cancel</button>
+                  <button class="btn" onclick="deleteAccount()" style="background:var(--bad);color:#fff;border-color:var(--bad);">Permanently delete</button>
+                </div>
+                <div class="err" id="deleteAccountErr" style="color:var(--bad);font-size:12px;margin-top:8px;"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Backup</h3>
+            <p style="font-size:13px;color:var(--ink-soft);margin:0 0 14px;line-height:1.5;">
+              Export a copy of your data as a file, or restore from one. Independent of your account — a manual safety net you control.
+            </p>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn" onclick="exportDataFile()">Export data (.json)</button>
+              <button class="btn" onclick="document.getElementById('importInput').click()">Import data (.json)</button>
+            </div>
+            <input type="file" accept="application/json" id="importInput" style="display:none;">
+          </div>
+
+          <div class="card">
             <h3>Security</h3>
             <div class="security-status" id="securityStatus"></div>
 
@@ -476,7 +537,7 @@
                 <button class="btn primary" onclick="setPassword()">Set password</button>
               </div>
               <div style="font-size:12px;color:var(--ink-soft);margin-top:10px;">
-                Optional. If you set one, this device will ask for it every time Clearway is opened, and your data is encrypted in the browser — not just hidden behind a screen. There's no password recovery: if it's lost, the data can't be unlocked.
+                Optional. If you set one, this device will ask for it every time Clearway is opened, and this device's local copy is encrypted — a fast lock for this device, separate from your account sign-in. There's no password recovery for it: if it's lost, use "Forgot this device's password?" on the lock screen — that resets this device only, your data is still safe in your account either way.
               </div>
             </div>
 
@@ -495,7 +556,7 @@
 
           <div class="install-hint">
             On your Mac: Safari → Share → Add to Dock.<br>
-            On iPhone: Safari → Share → Add to Home Screen. Your data stays on this device.
+            On iPhone: Safari → Share → Add to Home Screen. Your data syncs to your account and stays available offline on this device.
           </div>
         </section>
 
@@ -505,6 +566,61 @@
 </div>
 
 <div class="toast" id="toast"></div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js";
+  import {
+    initializeFirestore, persistentLocalCache, persistentSingleTabManager,
+    doc, getDoc, setDoc, deleteDoc, onSnapshot
+  } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
+  import {
+    getAuth, onAuthStateChanged, signOut,
+    signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail,
+    setPersistence, indexedDBLocalPersistence, browserLocalPersistence,
+    deleteUser, reauthenticateWithCredential, EmailAuthProvider
+  } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-auth.js";
+
+  // Shared with the CarBook project (Clearway hit the Firebase project-count quota, so this
+  // reuses CarBook's Auth + Firestore rather than a dedicated project). Clearway's data lives
+  // under its own top-level "clearway_users" collection, isolated from CarBook's collections.
+  const firebaseConfig = {
+    apiKey: "AIzaSyC4YOzm--iwvpZJOn8ocFX2rGFaGvQu7cQ",
+    authDomain: "carbook-1c258.firebaseapp.com",
+    projectId: "carbook-1c258",
+    storageBucket: "carbook-1c258.firebasestorage.app",
+    messagingSenderId: "128980994740",
+    appId: "1:128980994740:web:8489c2cfd9050b9b7325e1"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  // Same durable-session fix Recipe-Box uses: without this, iOS "Add to Home Screen"
+  // installs can silently drop the session and force a re-login.
+  setPersistence(auth, indexedDBLocalPersistence).catch(()=>{
+    setPersistence(auth, browserLocalPersistence).catch(()=>{});
+  });
+  const firestore = initializeFirestore(app, {
+    localCache: persistentLocalCache({ tabManager: persistentSingleTabManager() })
+  });
+
+  window.fb = {
+    auth, firestore,
+    onAuthStateChanged, signOut, doc, getDoc, setDoc, deleteDoc, onSnapshot,
+    async signIn(email, password){ return signInWithEmailAndPassword(auth, email, password); },
+    async signUp(email, password){ return createUserWithEmailAndPassword(auth, email, password); },
+    async resetPassword(email){ return sendPasswordResetEmail(auth, email); },
+    async reauthenticate(password){
+      const cred = EmailAuthProvider.credential(auth.currentUser.email, password);
+      return reauthenticateWithCredential(auth.currentUser, cred);
+    },
+    async deleteCurrentUser(){ return deleteUser(auth.currentUser); }
+  };
+  // The main app script below is a classic (non-module) script so its functions stay
+  // globally reachable for inline onclick="..." handlers throughout the HTML — but that
+  // means it isn't guaranteed to run after this deferred module script. Signal readiness
+  // explicitly rather than relying on execution order.
+  window.dispatchEvent(new Event('fb-ready'));
+</script>
 
 <script src="vendor/jspdf.umd.min.js"></script>
 <script src="vendor/jspdf.plugin.autotable.min.js"></script>
@@ -533,7 +649,6 @@ function blankState(){
 }
 
 let state = null;
-let whatIfSnapshot = null;
 let currentView = 'overview';
 let sidebarOpenMobile = false;
 
@@ -570,7 +685,6 @@ function hasVault(){ return !!localStorage.getItem(VAULT_KEY); }
 let activePassword = null; // held only in memory for this session, never persisted
 
 function saveLocal(){
-  if(whatIfSnapshot) return; // never persist while previewing
   if(activePassword){
     encryptState(activePassword, state).then(vault=>{
       localStorage.setItem(VAULT_KEY, JSON.stringify(vault));
@@ -578,6 +692,7 @@ function saveLocal(){
   } else {
     localStorage.setItem(PLAIN_KEY, JSON.stringify(state));
   }
+  if(!applyingRemote) pushToCloud(false);
 }
 
 function normalizeState(raw){
@@ -586,19 +701,134 @@ function normalizeState(raw){
   return merged;
 }
 
-/* ---------- Boot ---------- */
-async function boot(){
-  if(hasVault()){
-    document.getElementById('lockScreen').classList.add('show');
-    return; // wait for unlock
+/* ---------- Cloud account: auth + real-time Firestore sync ----------
+   Local storage (above) stays the always-on working copy — fast, and what
+   keeps the app usable offline. When signed in, the same state is mirrored
+   to Firestore (debounced) and a live listener applies changes made from
+   any other signed-in device. ------------------------------------------- */
+let cloudUser = null;
+let cloudDocRef = null;
+let cloudUnsub = null;
+let applyingRemote = false;
+let pushTimer = null;
+
+function pushToCloud(immediate){
+  if(!cloudUser || !cloudDocRef || applyingRemote) return;
+  clearTimeout(pushTimer);
+  const write = ()=> fb.setDoc(cloudDocRef, state).catch(err=>console.error('Cloud sync failed:', err));
+  if(immediate) write(); else pushTimer = setTimeout(write, 800);
+}
+
+function refreshUI(){
+  switchView(currentView);
+  renderSettingsForm();
+}
+
+function applyRemoteState(data){
+  applyingRemote = true;
+  state = normalizeState(data);
+  saveLocal(); // refresh the local mirror only — applyingRemote suppresses the cloud push
+  applyingRemote = false;
+  refreshUI();
+}
+
+// By the time this runs, `state` already holds whatever was loaded from this device
+// (decrypted, if it was vault-locked) — so just check the in-memory state directly.
+function stateHasData(s){
+  return !!((s.income&&s.income.length) || Object.values(s.expenses||{}).some(l=>l&&l.length) || (s.log&&s.log.length) || (s.notes&&s.notes.trim()));
+}
+
+// Snapshot this device's pre-cloud data under a side key before any first-run
+// decision can touch it, so "start fresh" never actually destroys anything.
+function backupLocalDataBeforeCloud(){
+  const raw = localStorage.getItem(PLAIN_KEY);
+  const vault = localStorage.getItem(VAULT_KEY);
+  if(raw) localStorage.setItem('clearway-pre-cloud-backup-plain', raw);
+  if(vault) localStorage.setItem('clearway-pre-cloud-backup-vault', vault);
+}
+
+function handleFirstRun(){
+  if(stateHasData(state)){
+    backupLocalDataBeforeCloud();
+    document.getElementById('migrateModal').classList.add('show');
+  } else {
+    pushToCloud(true); // brand-new account, nothing to offer — just create the doc
   }
+}
+
+document.getElementById('migrateImportBtn').addEventListener('click', ()=>{
+  document.getElementById('migrateModal').classList.remove('show');
+  pushToCloud(true); // state already holds this device's local data
+  showToast('Imported.');
+});
+document.getElementById('migrateSkipBtn').addEventListener('click', ()=>{
+  document.getElementById('migrateModal').classList.remove('show');
+  state = blankState();
+  saveLocal();
+  refreshUI();
+});
+
+function subscribeCloud(){
+  cloudDocRef = fb.doc(fb.firestore, 'clearway_users', cloudUser.uid);
+  let first = true;
+  cloudUnsub = fb.onSnapshot(cloudDocRef, snap=>{
+    if(snap.metadata.hasPendingWrites) return; // echo of our own write, already applied locally
+    if(first){
+      first = false;
+      if(!snap.exists()){ handleFirstRun(); return; }
+    }
+    if(snap.exists()) applyRemoteState(snap.data());
+  }, err=>{ console.error('Cloud listener error:', err); });
+}
+
+function unsubscribeCloud(){
+  if(cloudUnsub){ cloudUnsub(); cloudUnsub = null; }
+  cloudDocRef = null;
+}
+
+function loadLocalStateOnly(){
   const raw = localStorage.getItem(PLAIN_KEY);
   state = raw ? normalizeState(JSON.parse(raw)) : blankState();
-  showApp();
 }
+
+function handleAuthChange(user){
+  cloudUser = user;
+  unsubscribeCloud();
+  if(!user){
+    document.getElementById('authScreen').classList.add('show');
+    document.getElementById('lockScreen').classList.remove('show');
+    document.getElementById('app').classList.remove('show');
+    document.getElementById('authEmail').value = '';
+    document.getElementById('authPassword').value = '';
+    setAuthMode('signin');
+    return;
+  }
+  document.getElementById('authScreen').classList.remove('show');
+  document.getElementById('authErr').textContent = '';
+  document.getElementById('authOk').textContent = '';
+  if(hasVault()){
+    document.getElementById('lockScreen').classList.add('show'); // subscribeCloud() runs after attemptUnlock() succeeds
+  } else {
+    loadLocalStateOnly();
+    showApp();
+    subscribeCloud();
+  }
+}
+
+function initCloudAuth(){
+  fb.onAuthStateChanged(fb.auth, handleAuthChange);
+}
+if(window.fb) initCloudAuth(); else window.addEventListener('fb-ready', initCloudAuth, {once:true});
 
 document.getElementById('lockBtn').addEventListener('click', attemptUnlock);
 document.getElementById('lockInput').addEventListener('keydown', e=>{ if(e.key==='Enter') attemptUnlock(); });
+document.getElementById('lockForgotBtn').addEventListener('click', ()=>{
+  if(!confirm("This clears this device's local copy and password (your account data in the cloud is untouched). Continue?")) return;
+  localStorage.removeItem(VAULT_KEY);
+  localStorage.removeItem(PLAIN_KEY);
+  activePassword = null;
+  location.reload();
+});
 
 async function attemptUnlock(){
   const pw = document.getElementById('lockInput').value;
@@ -616,8 +846,110 @@ async function attemptUnlock(){
     activePassword = pw;
     document.getElementById('lockScreen').classList.remove('show');
     showApp();
+    subscribeCloud();
   }catch(e){
     errEl.textContent = 'Incorrect password.';
+  }
+}
+
+/* ---------- Auth screen (sign in / sign up) ---------- */
+let authMode = 'signin';
+function setAuthMode(mode){
+  authMode = mode;
+  document.getElementById('authSub').textContent = mode==='signin' ? 'Sign in to sync your budget across every device.' : 'Create an account to sync your budget across every device.';
+  document.getElementById('authSubmitBtn').textContent = mode==='signin' ? 'Sign in' : 'Create account';
+  document.getElementById('authToggleBtn').textContent = mode==='signin' ? 'Need an account? Sign up' : 'Already have an account? Sign in';
+  document.getElementById('authErr').textContent = '';
+  document.getElementById('authOk').textContent = '';
+}
+document.getElementById('authToggleBtn').addEventListener('click', ()=> setAuthMode(authMode==='signin' ? 'signup' : 'signin'));
+document.getElementById('authPassword').addEventListener('keydown', e=>{ if(e.key==='Enter') submitAuthForm(); });
+document.getElementById('authSubmitBtn').addEventListener('click', submitAuthForm);
+async function submitAuthForm(){
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  const errEl = document.getElementById('authErr');
+  const okEl = document.getElementById('authOk');
+  errEl.textContent = ''; okEl.textContent = '';
+  if(!email || !password){ errEl.textContent = 'Enter an email and password.'; return; }
+  try{
+    if(authMode==='signin') await fb.signIn(email, password);
+    else await fb.signUp(email, password);
+    // handleAuthChange() picks up from here via onAuthStateChanged
+  }catch(e){
+    errEl.textContent = authErrorMessage(e);
+  }
+}
+document.getElementById('authForgotBtn').addEventListener('click', async ()=>{
+  const email = document.getElementById('authEmail').value.trim();
+  const errEl = document.getElementById('authErr');
+  const okEl = document.getElementById('authOk');
+  errEl.textContent = ''; okEl.textContent = '';
+  if(!email){ errEl.textContent = 'Enter your email above first.'; return; }
+  try{
+    await fb.resetPassword(email);
+    okEl.textContent = 'Password reset email sent.';
+  }catch(e){
+    errEl.textContent = authErrorMessage(e);
+  }
+});
+function authErrorMessage(e){
+  const map = {
+    'auth/invalid-email': 'That email address looks off.',
+    'auth/user-not-found': 'No account with that email yet — try Sign up.',
+    'auth/invalid-credential': 'Incorrect email or password.',
+    'auth/wrong-password': 'Incorrect password.',
+    'auth/email-already-in-use': 'An account already exists for that email — try Sign in.',
+    'auth/weak-password': 'Use at least 6 characters.'
+  };
+  return map[e.code] || (e.message || 'Something went wrong. Try again.');
+}
+function confirmSignOut(){
+  if(!confirm("Sign out of Clearway on this device? You'll need to sign back in to see your budget again.")) return;
+  signOutOfCloud();
+}
+async function signOutOfCloud(){
+  unsubscribeCloud();
+  await fb.signOut(fb.auth);
+  // Clear this device's local mirror so it can't leak into whichever account signs in
+  // here next (and doesn't get mistakenly offered as "existing local data" to migrate).
+  localStorage.removeItem(PLAIN_KEY);
+  localStorage.removeItem(VAULT_KEY);
+  activePassword = null;
+  state = null;
+}
+
+/* ---------- Delete account (start fresh) ---------- */
+function showDeleteAccountForm(){
+  document.getElementById('deleteAccountForm').style.display = 'block';
+  document.getElementById('showDeleteAccountBtn').style.display = 'none';
+}
+function hideDeleteAccountForm(){
+  document.getElementById('deleteAccountForm').style.display = 'none';
+  document.getElementById('showDeleteAccountBtn').style.display = 'inline-block';
+  document.getElementById('deleteAccountPassword').value = '';
+  document.getElementById('deleteAccountErr').textContent = '';
+}
+async function deleteAccount(){
+  const password = document.getElementById('deleteAccountPassword').value;
+  const errEl = document.getElementById('deleteAccountErr');
+  errEl.textContent = '';
+  if(!password){ errEl.textContent = 'Enter your password to confirm.'; return; }
+  if(!confirm('This permanently deletes your account and everything synced to it. This cannot be undone. Continue?')) return;
+  try{
+    await fb.reauthenticate(password);
+    // Delete the Firestore doc while still authenticated as its owner — the security
+    // rules require that, and it stops being true the instant the auth user is gone.
+    if(cloudDocRef) await fb.deleteDoc(cloudDocRef);
+    await fb.deleteCurrentUser();
+    unsubscribeCloud();
+    localStorage.removeItem(PLAIN_KEY);
+    localStorage.removeItem(VAULT_KEY);
+    activePassword = null;
+    state = null;
+    // onAuthStateChanged fires on its own now that the account is gone, showing the sign-in screen.
+  }catch(e){
+    errEl.textContent = authErrorMessage(e);
   }
 }
 
@@ -627,6 +959,7 @@ function showApp(){
   switchView('overview');
   renderSettingsForm();
   renderSecurityStatus();
+  renderAccountStatus();
   initReceiptScanner();
 }
 
@@ -974,7 +1307,10 @@ async function handleReceiptFile(file){
   }
 }
 
+let receiptScannerInitialized = false;
 function initReceiptScanner(){
+  if(receiptScannerInitialized) return; // showApp() can now run more than once per page load (sign out, then back in)
+  receiptScannerInitialized = true;
   document.getElementById('receiptInput').addEventListener('change', e=>{
     const file = e.target.files[0];
     handleReceiptFile(file);
@@ -1067,29 +1403,6 @@ function updateTotals(){
 }
 document.getElementById('notesArea').addEventListener('input', e=>{ state.notes = e.target.value; saveLocal(); });
 
-/* ---------- What-if ---------- */
-function enterWhatIf(){
-  if(whatIfSnapshot) return;
-  whatIfSnapshot = JSON.parse(JSON.stringify(state));
-  document.getElementById('whatifBanner').classList.add('show');
-  [document.getElementById('whatifBtnDesktop'), document.getElementById('whatifBtnMobile')].forEach(b=>{ if(b){ b.classList.add('warn-active'); b.textContent='Exploring…'; }});
-}
-function discardWhatIf(){
-  if(!whatIfSnapshot) return;
-  state = whatIfSnapshot; whatIfSnapshot = null;
-  document.getElementById('whatifBanner').classList.remove('show');
-  [document.getElementById('whatifBtnDesktop'), document.getElementById('whatifBtnMobile')].forEach(b=>{ if(b){ b.classList.remove('warn-active'); b.textContent='What if…'; }});
-  switchView(currentView);
-}
-function keepWhatIf(){
-  whatIfSnapshot = null;
-  document.getElementById('whatifBanner').classList.remove('show');
-  [document.getElementById('whatifBtnDesktop'), document.getElementById('whatifBtnMobile')].forEach(b=>{ if(b){ b.classList.remove('warn-active'); b.textContent='What if…'; }});
-  saveLocal();
-}
-document.getElementById('discardWhatif').addEventListener('click', discardWhatIf);
-document.getElementById('keepWhatif').addEventListener('click', keepWhatIf);
-
 /* ---------- Settings: personal info ---------- */
 function renderSettingsForm(){
   const s = state.settings;
@@ -1101,6 +1414,38 @@ function renderSettingsForm(){
   document.getElementById('setVehicleYear').value = s.vehicleYear||'';
   document.getElementById('setVehicleType').value = s.vehicleType||'';
 }
+/* ---------- Settings: manual backup (Export / Import JSON) ---------- */
+function exportDataFile(){
+  const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `clearway-backup-${todayISO()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  showToast('Exported.');
+}
+document.getElementById('importInput').addEventListener('change', e=>{
+  const file = e.target.files[0];
+  e.target.value = '';
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try{
+      const parsed = JSON.parse(reader.result);
+      state = normalizeState(parsed);
+      saveLocal();
+      refreshUI();
+      showToast('Imported.');
+    }catch(err){
+      showToast("Couldn't read that file — is it a Clearway export?");
+    }
+  };
+  reader.readAsText(file);
+});
+
 function saveSettingsFields(){
   state.settings = {
     name: document.getElementById('setName').value,
@@ -1117,6 +1462,12 @@ function saveSettingsFields(){
 }
 
 /* ---------- Settings: security ---------- */
+function renderAccountStatus(){
+  const el = document.getElementById('accountStatus');
+  if(!el) return;
+  el.textContent = cloudUser ? `✅ Signed in as ${cloudUser.email}. Synced across your devices.` : '';
+}
+
 function renderSecurityStatus(){
   const el = document.getElementById('securityStatus');
   const on = hasVault();
@@ -1421,8 +1772,6 @@ function downloadReport(type){
   doc.save(filename);
 }
 
-/* ---------- Init ---------- */
-boot();
 </script>
 
 </body>
