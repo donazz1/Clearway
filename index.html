@@ -1131,14 +1131,69 @@ function renderCategoryViews(){
     sec.innerHTML = `
       <div class="view-head"><h1>${cat}</h1></div>
       <div class="card">
+        <h3>Recurring</h3>
         <div class="rows"></div>
         <button class="add-row">+ Add to ${cat}</button>
+      </div>
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <h3 style="margin:0;">Logged this month</h3>
+          <span style="font-size:12px;color:var(--ink-soft);" class="cat-log-total"></span>
+        </div>
+        <div class="cat-log-list"></div>
       </div>
     `;
     const rowsEl = sec.querySelector('.rows');
     renderRows(rowsEl, state.expenses[cat], 'expense');
     sec.querySelector('.add-row').addEventListener('click', ()=>addRow('expense', cat));
+    renderCategoryLogEntries(sec, cat);
     wrap.appendChild(sec);
+  });
+}
+
+function renderCategoryLogEntries(sec, cat){
+  const listEl = sec.querySelector('.cat-log-list');
+  const totalEl = sec.querySelector('.cat-log-total');
+  const ym = new Date().toISOString().slice(0,7);
+  const entries = state.log.filter(e => e.bucket===cat && monthKeyOf(e.date)===ym)
+    .slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+
+  const total = entries.reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
+  totalEl.textContent = entries.length ? `${fmt(total)} · ${entries.length} ${entries.length===1?'entry':'entries'}` : '';
+
+  if(entries.length===0){
+    listEl.innerHTML = `<div class="log-empty">Nothing logged here yet this month. <a href="#" class="cat-log-jump">Log one →</a></div>`;
+    listEl.querySelector('.cat-log-jump').addEventListener('click', (e)=>{ e.preventDefault(); switchView('log'); });
+    return;
+  }
+
+  listEl.innerHTML = entries.map(e=>{
+    const primary = e.merchant || e.note || '—';
+    return `
+      <div class="log-entry" data-id="${e.id}" style="cursor:pointer;">
+        <span class="le-date">${(e.date||'').slice(5)}</span>
+        <span class="le-note"><strong>${escapeAttr(primary)}</strong></span>
+        <span class="le-amt expense">-${fmt(Math.abs(parseFloat(e.amount)||0))}</span>
+        <button class="le-del" data-id="${e.id}" title="Remove">×</button>
+      </div>`;
+  }).join('');
+
+  listEl.querySelectorAll('.log-entry').forEach(row=>{
+    row.addEventListener('click', (e)=>{
+      if(e.target.closest('.le-del')) return;
+      const id = row.dataset.id;
+      switchView('log');
+      setTimeout(()=>openEntryForEdit(id), 60);
+    });
+  });
+  listEl.querySelectorAll('.le-del').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      state.log = state.log.filter(l=>l.id!==btn.dataset.id);
+      saveLocal();
+      renderCategoryLogEntries(sec, cat);
+      if(currentView==='yearview') renderYearView();
+    });
   });
 }
 
