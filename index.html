@@ -223,9 +223,12 @@
   @media(max-width:520px){.field-grid{grid-template-columns:1fr;}}
   .field-labeled{margin-bottom:4px;}
   .field-labeled label{display:block;font-size:12px;color:var(--ink-soft);margin-bottom:5px;font-weight:600;}
-  .field-labeled input[type=text], .field-labeled input[type=password], .field-labeled input[type=email], .field-labeled select{
+  .field-labeled input[type=text], .field-labeled input[type=password], .field-labeled input[type=email], .field-labeled input[type=date], .field-labeled select{
     width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--paper);font-size:14px;color:var(--ink);
+    box-sizing:border-box;height:42px;
   }
+  .field-labeled select{padding-right:26px;}
+  .field-labeled input[type=date]{padding:10px 8px;}
   .field-labeled input:focus, .field-labeled select:focus{outline:1px solid var(--focus);}
 
   .security-status{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:11px;margin-bottom:14px;font-size:13px;}
@@ -435,9 +438,13 @@
               <div class="field-labeled" style="grid-column:1 / -1;"><label>Merchant</label><input type="text" id="logMerchant" placeholder="e.g. Shell, Sobeys"></div>
               <div class="field-labeled"><label>Amount</label><input type="text" id="logAmount" placeholder="0"></div>
               <div class="field-labeled"><label>Tax (optional)</label><input type="text" id="logTax" placeholder="0"></div>
+              <div class="field-labeled"><label>Tip (optional)</label><input type="text" id="logTip" placeholder="0"></div>
               <div class="field-labeled" style="grid-column:1 / -1;"><label>Note (optional)</label><input type="text" id="logNote" placeholder="e.g. Friday night fares, oil change too"></div>
             </div>
-            <div style="margin-top:12px;"><button class="btn primary" onclick="addLogEntry()">Add entry</button></div>
+            <div style="margin-top:12px;display:flex;gap:8px;">
+              <button class="btn primary" id="logSubmitBtn" onclick="addLogEntry()">Add entry</button>
+              <button class="btn" id="logCancelEditBtn" onclick="cancelEntryEdit()" style="display:none;">Cancel</button>
+            </div>
           </div>
 
           <div class="card">
@@ -1207,6 +1214,7 @@ function onCategoryPointerDown(e){
   const item = e.target.closest('.navitem[data-cat]');
   if(!item) return;
   const startY = e.clientY;
+  const startX = e.clientX;
   const pointerId = e.pointerId;
   let longPressFired = false;
 
@@ -1220,7 +1228,11 @@ function onCategoryPointerDown(e){
     document.removeEventListener('pointerup', onEarlyUp);
   }
   function onEarlyMove(moveEvt){
-    if(!longPressFired && Math.abs(moveEvt.clientY - startY) > 8){
+    // Generous threshold — a real finger holding still on a touchscreen drifts more than
+    // a mouse pointer does. Too tight a threshold here was likely why this felt flaky:
+    // normal hand tremor during the hold was probably cancelling drag-intent early.
+    const dist = Math.hypot(moveEvt.clientX-startX, moveEvt.clientY-startY);
+    if(!longPressFired && dist > 18){
       clearTimeout(longPressTimer);
       cleanupEarly();
     }
@@ -1241,59 +1253,70 @@ function beginCategoryDrag(item, startY, pointerId){
   try{ item.setPointerCapture(pointerId); }catch(err){}
   item.classList.add('dragging');
   item.style.touchAction = 'none';
+  item.style.transition = 'none';
   if(navigator.vibrate) navigator.vibrate(10);
 
-  const rect = item.getBoundingClientRect();
-  categoryDragState = { cat, currentIndex: startIndex, itemTop: rect.top, itemHeight: rect.height, startY };
+  // Snapshot the real DOM elements once — these nodes are never destroyed or replaced
+  // for the rest of this gesture. Only their CSS transform changes. The array (`order`)
+  // tracks the intended final position; it isn't written back to state.catOrder or
+  // re-rendered until the finger lifts.
+  const allItems = [...document.querySelectorAll('.navitem[data-cat]')];
+  const originalIndexOf = new Map(allItems.map((el,i)=>[el.dataset.cat, i]));
+  const itemHeight = item.getBoundingClientRect().height;
+  const order = state.catOrder.slice();
+  let currentIndex = startIndex;
+
+  categoryDragState = { active: true };
+
+  function applySiblingPositions(){
+    allItems.forEach(el=>{
+      if(el === item) return;
+      const c = el.dataset.cat;
+      const originalIdx = originalIndexOf.get(c);
+      const newIdx = order.indexOf(c);
+      const shift = newIdx - originalIdx;
+      el.style.transition = 'transform 150ms ease';
+      el.style.transform = shift === 0 ? '' : `translateY(${shift * itemHeight}px)`;
+    });
+  }
 
   const onMove = (e) => {
-    if(!categoryDragState) return;
-    const deltaY = e.clientY - categoryDragState.startY;
+    if(!categoryDragState || !categoryDragState.active) return;
+    const deltaY = e.clientY - startY;
     item.style.transform = `translateY(${deltaY}px)`;
 
-    const catItems = [...document.querySelectorAll('.navitem[data-cat]')];
-    const draggedCenter = categoryDragState.itemTop + categoryDragState.itemHeight/2 + deltaY;
-    let targetIndex = categoryDragState.currentIndex;
+    // How many item-heights has the finger moved from the start? Simple and robust —
+    // doesn't depend on re-measuring any element's live position mid-gesture.
+    const rawShift = Math.round(deltaY / itemHeight);
+    const newIndex = Math.max(0, Math.min(order.length-1, startIndex + rawShift));
 
-    catItems.forEach((el) => {
-      if(el === item) return;
-      const elIndex = state.catOrder.indexOf(el.dataset.cat);
-      const r = el.getBoundingClientRect();
-      const elCenter = r.top + r.height/2;
-      if(elIndex < categoryDragState.currentIndex && draggedCenter < elCenter) targetIndex = Math.min(targetIndex, elIndex);
-      else if(elIndex > categoryDragState.currentIndex && draggedCenter > elCenter) targetIndex = Math.max(targetIndex, elIndex);
-    });
-
-    if(targetIndex !== categoryDragState.currentIndex){
-      const [moved] = state.catOrder.splice(categoryDragState.currentIndex, 1);
-      state.catOrder.splice(targetIndex, 0, moved);
-      categoryDragState.currentIndex = targetIndex;
-      renderNav();
-      const newItem = document.querySelector(`.navitem[data-cat="${CSS.escape(cat)}"]`);
-      if(newItem){
-        newItem.classList.add('dragging');
-        newItem.style.touchAction = 'none';
-        const newRect = newItem.getBoundingClientRect();
-        categoryDragState.itemTop = newRect.top - deltaY;
-        categoryDragState.itemHeight = newRect.height;
-        try{ newItem.setPointerCapture(pointerId); }catch(err){}
-        item = newItem;
-        item.style.transform = `translateY(${deltaY}px)`;
-      }
+    if(newIndex !== currentIndex){
+      const [moved] = order.splice(currentIndex, 1);
+      order.splice(newIndex, 0, moved);
+      currentIndex = newIndex;
+      applySiblingPositions();
     }
   };
 
   const onUp = () => {
     document.removeEventListener('pointermove', onMove);
     document.removeEventListener('pointerup', onUp);
-    if(item){ item.classList.remove('dragging'); item.style.transform=''; item.style.touchAction=''; }
-    if(categoryDragState){
+    if(categoryDragState) categoryDragState.active = false;
+
+    item.classList.remove('dragging');
+    item.style.transform = '';
+    item.style.touchAction = '';
+    item.style.transition = '';
+    allItems.forEach(el=>{ el.style.transform=''; el.style.transition=''; });
+
+    if(currentIndex !== startIndex){
+      state.catOrder = order;
       saveLocal();
-      categoryDragSuppressClick = true;
-      setTimeout(()=>{ categoryDragSuppressClick = false; }, 80);
     }
+    categoryDragSuppressClick = true;
+    setTimeout(()=>{ categoryDragSuppressClick = false; }, 80);
     categoryDragState = null;
-    renderNav();
+    renderNav(); // single rebuild, reflecting the final settled order
   };
 
   document.addEventListener('pointermove', onMove);
@@ -1364,11 +1387,15 @@ function renderLogList(){
     listEl.innerHTML = Object.keys(groups).sort().reverse().map(ym=>{
       const rows = groups[ym].map(e=>{
         const isIncome = e.bucket==='Income';
-        const taxNote = e.tax ? ` <span style="color:var(--ink-soft);font-size:11px;">(incl. ${fmt(e.tax)} tax)</span>` : '';
+        const taxTip = [
+          e.tax ? `${fmt(e.tax)} tax` : null,
+          e.tip ? `${fmt(e.tip)} tip` : null
+        ].filter(Boolean).join(', ');
+        const taxNote = taxTip ? ` <span style="color:var(--ink-soft);font-size:11px;">(incl. ${taxTip})</span>` : '';
         const primary = e.merchant || e.note || '—';
         const secondary = (e.merchant && e.note) ? ` <span style="color:var(--ink-soft);">— ${escapeAttr(e.note)}</span>` : '';
         return `
-          <div class="log-entry">
+          <div class="log-entry" data-id="${e.id}" style="cursor:pointer;">
             <span class="le-date">${(e.date||'').slice(5)}</span>
             <span class="le-bucket ${isIncome?'income':'expense'}">${escapeAttr(e.bucket)}</span>
             <span class="le-note"><strong>${escapeAttr(primary)}</strong>${secondary}${taxNote}</span>
@@ -1379,9 +1406,17 @@ function renderLogList(){
       return `<div class="log-month-group"><div class="log-month-head">${monthLabel(ym)}</div>${rows}</div>`;
     }).join('');
 
+    listEl.querySelectorAll('.log-entry').forEach(row=>{
+      row.addEventListener('click', (e)=>{
+        if(e.target.closest('.le-del')) return; // delete button handles its own click below
+        openEntryForEdit(row.dataset.id);
+      });
+    });
     listEl.querySelectorAll('.le-del').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        state.log = state.log.filter(e=>e.id!==btn.dataset.id);
+      btn.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        state.log = state.log.filter(l=>l.id!==btn.dataset.id);
+        if(editingEntryId===btn.dataset.id) cancelEntryEdit(); // don't leave a stale edit open on a deleted entry
         saveLocal(); renderLogList(); if(currentView==='yearview') renderYearView();
       });
     });
@@ -1415,37 +1450,97 @@ function renderMerchantBreakdown(entries){
   `).join('');
 }
 
+let editingEntryId = null;
+
+function clearLogForm(){
+  document.getElementById('logAmount').value = '';
+  document.getElementById('logTax').value = '';
+  document.getElementById('logTip').value = '';
+  document.getElementById('logMerchant').value = '';
+  document.getElementById('logNote').value = '';
+  document.getElementById('logDate').value = todayISO();
+}
+
+function updateEditModeUI(){
+  const btn = document.getElementById('logSubmitBtn');
+  const cancelBtn = document.getElementById('logCancelEditBtn');
+  if(editingEntryId){
+    btn.textContent = 'Update entry';
+    cancelBtn.style.display = 'inline-block';
+  } else {
+    btn.textContent = 'Add entry';
+    cancelBtn.style.display = 'none';
+  }
+}
+
+function openEntryForEdit(id){
+  const entry = state.log.find(e=>e.id===id);
+  if(!entry) return;
+  editingEntryId = id;
+  document.getElementById('logDate').value = entry.date || todayISO();
+  document.getElementById('logMerchant').value = entry.merchant || '';
+  document.getElementById('logBucket').value = entry.bucket || '';
+  document.getElementById('logAmount').value = entry.amount || '';
+  document.getElementById('logTax').value = entry.tax || '';
+  document.getElementById('logTip').value = entry.tip || '';
+  document.getElementById('logNote').value = entry.note || '';
+  updateEditModeUI();
+  const card = document.getElementById('logEntryCard');
+  if(card) card.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function cancelEntryEdit(){
+  editingEntryId = null;
+  clearLogForm();
+  updateEditModeUI();
+}
+
 function addLogEntry(){
   const date = document.getElementById('logDate').value || todayISO();
   const bucket = document.getElementById('logBucket').value;
   const amount = parseFloat(document.getElementById('logAmount').value);
   const tax = parseFloat(document.getElementById('logTax').value) || null;
+  const tip = parseFloat(document.getElementById('logTip').value) || null;
   const merchant = document.getElementById('logMerchant').value.trim();
   const note = document.getElementById('logNote').value;
   if(!amount || amount<=0){ showToast('Enter an amount.'); return; }
-  state.log.push({ id: 'l'+Date.now()+Math.random().toString(36).slice(2,7), date, bucket, amount, tax, merchant, note });
+
+  if(editingEntryId){
+    const entry = state.log.find(e=>e.id===editingEntryId);
+    if(entry) Object.assign(entry, { date, bucket, amount, tax, tip, merchant, note });
+    editingEntryId = null;
+    updateEditModeUI();
+    showToast('Updated.');
+  } else {
+    state.log.push({ id: 'l'+Date.now()+Math.random().toString(36).slice(2,7), date, bucket, amount, tax, tip, merchant, note });
+    showToast('Logged.');
+  }
   saveLocal();
-  document.getElementById('logAmount').value = '';
-  document.getElementById('logTax').value = '';
-  document.getElementById('logMerchant').value = '';
-  document.getElementById('logNote').value = '';
-  document.getElementById('logNote').value = '';
+  clearLogForm();
   renderLogList();
-  showToast('Logged.');
 }
 
 /* ---------- Receipt scanning (Tier 1: on-device OCR, confirm-before-save) ---------- */
 let tesseractLoadPromise = null;
+function withTimeout(promise, ms, timeoutMessage){
+  return new Promise((resolve, reject)=>{
+    const timer = setTimeout(()=>reject(new Error(timeoutMessage)), ms);
+    promise.then(v=>{ clearTimeout(timer); resolve(v); }, e=>{ clearTimeout(timer); reject(e); });
+  });
+}
+
 function lazyLoadTesseract(){
   if(window.Tesseract) return Promise.resolve();
   if(tesseractLoadPromise) return tesseractLoadPromise;
-  tesseractLoadPromise = new Promise((resolve, reject)=>{
+  const loadPromise = new Promise((resolve, reject)=>{
     const s = document.createElement('script');
     s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js';
     s.onload = () => resolve();
     s.onerror = () => reject(new Error('Could not load the receipt reader — check your internet connection.'));
     document.head.appendChild(s);
   });
+  tesseractLoadPromise = withTimeout(loadPromise, 15000, "This is taking too long to load — weak signal? Try again when you've got a stronger connection.")
+    .catch(err => { tesseractLoadPromise = null; throw err; }); // don't cache a failed attempt — let the next tap retry cleanly
   return tesseractLoadPromise;
 }
 
@@ -1562,6 +1657,15 @@ function parseReceiptText(text){
     if(m) tax = parseFloat(m[m.length-1].replace(/[^0-9.]/g,''));
   }
 
+  // Tip: shown as its own line on restaurant/service receipts, informational like tax —
+  // the amount above already includes it (that's what makes the debit-card-sale line correct).
+  let tip = null;
+  const tipLine = lines.find(l => /\btip\b/i.test(l) && !/\bno\s+tip\b/i.test(l));
+  if(tipLine){
+    const m = tipLine.match(amountRe);
+    if(m) tip = parseFloat(m[m.length-1].replace(/[^0-9.]/g,''));
+  }
+
   // Merchant: first substantial line that looks like real text — skipping generic
   // receipt-header boilerplate that isn't actually the business name.
   const GENERIC_RECEIPT_HEADERS = /^(transaction record|receipt|tax invoice|sales receipt|invoice|order confirmation|customer copy|merchant copy|official (prescription )?receipt)$/i;
@@ -1571,7 +1675,7 @@ function parseReceiptText(text){
   const bucket = guessBucket(lower);
   const date = parseReceiptDate(text);
 
-  return { amount, tax, merchant, bucket, date, rawText: text };
+  return { amount, tax, tip, merchant, bucket, date, rawText: text };
 }
 
 function setReceiptStatus(html){
@@ -1627,14 +1731,37 @@ async function handleReceiptFile(file){
     await lazyLoadTesseract();
     const ocrInput = await preprocessReceiptImage(file).catch(()=>file); // fall back to the raw photo if preprocessing fails for any reason
     const { createWorker } = window.Tesseract;
-    const worker = await createWorker('eng');
-    const { data: { text } } = await worker.recognize(ocrInput);
-    await worker.terminate();
+
+    // On a slow connection, the worker still needs to download its recognition engine and
+    // language data (several MB) before it can even start reading — that can take a while
+    // even when it's going to succeed, so give a progress cue rather than let it look frozen.
+    const progressTimer = setTimeout(()=>{
+      const el = document.getElementById('receiptStatusText');
+      if(el && el.textContent === 'Reading receipt…') el.textContent = 'Still working — downloading the reader on a slow connection can take a bit…';
+    }, 6000);
+
+    const recognizeText = (async () => {
+      const worker = await createWorker('eng');
+      try{
+        const { data } = await worker.recognize(ocrInput);
+        return data.text;
+      } finally {
+        worker.terminate();
+      }
+    })();
+
+    let text;
+    try{
+      text = await withTimeout(recognizeText, 60000, "This is taking too long — weak signal? Try again once you've got a stronger connection.");
+    } finally {
+      clearTimeout(progressTimer);
+    }
 
     const parsed = parseReceiptText(text);
 
     if(parsed.amount) document.getElementById('logAmount').value = parsed.amount.toFixed(2);
     if(parsed.tax) document.getElementById('logTax').value = parsed.tax.toFixed(2);
+    if(parsed.tip) document.getElementById('logTip').value = parsed.tip.toFixed(2);
     if(parsed.merchant) document.getElementById('logMerchant').value = parsed.merchant;
     if(parsed.bucket) document.getElementById('logBucket').value = parsed.bucket;
     if(parsed.date) document.getElementById('logDate').value = parsed.date;
@@ -1643,6 +1770,7 @@ async function handleReceiptFile(file){
     const found = [], missing = [];
     if(parsed.amount) found.push('amount'); else missing.push('amount');
     if(parsed.tax) found.push('tax');
+    if(parsed.tip) found.push('tip');
     if(parsed.date) found.push('date');
     if(parsed.merchant) found.push('merchant'); else missing.push('merchant');
     if(parsed.bucket) found.push('category'); else missing.push('category');
@@ -1968,7 +2096,7 @@ function buildSummaryDoc(){
       headStyles:{fillColor:PDF_COLORS.ink, textColor:PDF_COLORS.white, fontStyle:'bold', fontSize:9},
       footStyles:{fillColor:PDF_COLORS.goodSoft, textColor:PDF_COLORS.ink, fontStyle:'bold', fontSize:9},
       bodyStyles:{fontSize:9, textColor:PDF_COLORS.ink},
-      columnStyles:{2:{halign:'right'}}
+      columnStyles:{0:{cellWidth:310}, 1:{cellWidth:110}, 2:{cellWidth:112, halign:'right'}}
     });
     y = doc.lastAutoTable.finalY + 22;
   }
@@ -1988,7 +2116,7 @@ function buildSummaryDoc(){
         theme:'grid',
         headStyles:{fillColor:PDF_COLORS.accent, textColor:PDF_COLORS.white, fontStyle:'bold', fontSize:9},
         bodyStyles:{fontSize:9, textColor:PDF_COLORS.ink},
-        columnStyles:{2:{halign:'right'}}
+        columnStyles:{0:{cellWidth:310}, 1:{cellWidth:110}, 2:{cellWidth:112, halign:'right'}}
       });
       y = doc.lastAutoTable.finalY + 14;
     });
@@ -2045,6 +2173,14 @@ function buildAccountingDoc(){
   doc.text('Period: Monthly, with figures annualized (× 12) · Generated ' + todayLong(), 40, 75);
   doc.setDrawColor(...PDF_COLORS.line); doc.line(40, 86, 572, 86);
 
+  // Fixed column geometry, used by every table AND every manually-drawn line in this
+  // report, so nothing drifts relative to anything else — this is what was actually
+  // broken before: autoTable was free to compute slightly different column boundaries
+  // per table/section, and the manually-drawn Total/Net lines used yet other numbers.
+  const COL_DESC_W = 300, COL_MONTHLY_W = 100, COL_ANNUAL_W = 132;
+  const COL_MONTHLY_RIGHT = 40 + COL_DESC_W + COL_MONTHLY_W - 6; // matches autoTable's internal cell padding
+  const COL_ANNUAL_RIGHT = 40 + COL_DESC_W + COL_MONTHLY_W + COL_ANNUAL_W - 6;
+
   let y = 106;
   doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(...PDF_COLORS.ink);
   doc.text('INCOME', 40, y); y += 8;
@@ -2063,7 +2199,7 @@ function buildAccountingDoc(){
     headStyles:{fontStyle:'bold', fontSize:9, textColor:PDF_COLORS.ink, lineWidth:{bottom:1}, lineColor:PDF_COLORS.ink},
     footStyles:{fontStyle:'bold', fontSize:9, textColor:PDF_COLORS.ink, lineWidth:{top:1}, lineColor:PDF_COLORS.ink},
     bodyStyles:{fontSize:9, textColor:PDF_COLORS.ink},
-    columnStyles:{1:{halign:'right'}, 2:{halign:'right'}}
+    columnStyles:{0:{cellWidth:COL_DESC_W}, 1:{cellWidth:COL_MONTHLY_W, halign:'right'}, 2:{cellWidth:COL_ANNUAL_W, halign:'right'}}
   });
   y = doc.lastAutoTable.finalY + 26;
 
@@ -2090,7 +2226,7 @@ function buildAccountingDoc(){
       headStyles:{fontStyle:'bold', fontSize:9, textColor:PDF_COLORS.inkSoft, lineWidth:{bottom:0.5}, lineColor:PDF_COLORS.line},
       footStyles:{fontStyle:'italic', fontSize:8.5, textColor:PDF_COLORS.inkSoft, lineWidth:{top:0.5}, lineColor:PDF_COLORS.line},
       bodyStyles:{fontSize:9, textColor:PDF_COLORS.ink},
-      columnStyles:{1:{halign:'right'}, 2:{halign:'right'}}
+      columnStyles:{0:{cellWidth:COL_DESC_W}, 1:{cellWidth:COL_MONTHLY_W, halign:'right'}, 2:{cellWidth:COL_ANNUAL_W, halign:'right'}}
     });
     y = doc.lastAutoTable.finalY + 12;
   });
@@ -2100,8 +2236,8 @@ function buildAccountingDoc(){
   doc.setDrawColor(...PDF_COLORS.ink); doc.setLineWidth(1); doc.line(40, y, 572, y); y += 16;
   doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...PDF_COLORS.ink);
   doc.text('Total Expenses', 40, y);
-  doc.text(fmt(expenseTotal), 460, y, {align:'right'});
-  doc.text(fmt(expenseTotal*12), 572, y, {align:'right'});
+  doc.text(fmt(expenseTotal), COL_MONTHLY_RIGHT, y, {align:'right'});
+  doc.text(fmt(expenseTotal*12), COL_ANNUAL_RIGHT, y, {align:'right'});
   y += 30;
 
   // Net income box
@@ -2112,12 +2248,12 @@ function buildAccountingDoc(){
   doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...PDF_COLORS.ink);
   doc.text('NET INCOME', 56, y+2);
   doc.setFontSize(9); doc.setFont('helvetica','normal'); doc.setTextColor(...PDF_COLORS.inkSoft);
-  doc.text('Monthly', 400, y-6, {align:'right'});
-  doc.text('Annualized', 560, y-6, {align:'right'});
+  doc.text('Monthly', COL_MONTHLY_RIGHT, y-6, {align:'right'});
+  doc.text('Annualized', COL_ANNUAL_RIGHT, y-6, {align:'right'});
   doc.setFont('helvetica','bold'); doc.setFontSize(12);
   doc.setTextColor(...(net<0?PDF_COLORS.bad:PDF_COLORS.ink));
-  doc.text(fmtAcct(net), 400, y+10, {align:'right'});
-  doc.text(fmtAcct(net*12), 560, y+10, {align:'right'});
+  doc.text(fmtAcct(net), COL_MONTHLY_RIGHT, y+10, {align:'right'});
+  doc.text(fmtAcct(net*12), COL_ANNUAL_RIGHT, y+10, {align:'right'});
 
   y += 50;
   doc.setFont('helvetica','italic'); doc.setFontSize(8); doc.setTextColor(...PDF_COLORS.inkSoft);
