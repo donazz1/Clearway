@@ -439,6 +439,10 @@
 
           <div class="card" id="logEntryCard">
             <h3>Log an entry</h3>
+            <div id="logPhotoPreview" style="display:none;margin-bottom:14px;">
+              <img id="logPhotoImg" style="max-width:100%;max-height:320px;border-radius:10px;border:1px solid var(--line);display:block;">
+              <button type="button" class="tax-add-btn" style="margin-top:6px;color:var(--bad);" onclick="removeLogPhoto()">Remove photo</button>
+            </div>
             <div class="log-form">
               <div class="field-labeled"><label>Date</label><input type="date" id="logDate"></div>
               <div class="field-labeled">
@@ -1487,7 +1491,7 @@ function renderLogList(){
           e.tip ? `${fmt(e.tip)} tip` : null
         ].filter(Boolean).join(', ');
         const taxNote = taxTip ? ` <span style="color:var(--ink-soft);font-size:11px;">(incl. ${taxTip})</span>` : '';
-        const primary = e.merchant || e.note || '—';
+        const primary = (e.merchant || e.note || '—') + (e.receiptPhoto ? ' 📷' : '');
         const secondary = (e.merchant && e.note) ? ` <span style="color:var(--ink-soft);">— ${escapeAttr(e.note)}</span>` : '';
         return `
           <div class="log-entry" data-id="${e.id}" style="cursor:pointer;">
@@ -1547,6 +1551,51 @@ function renderMerchantBreakdown(entries){
 
 let editingEntryId = null;
 
+/* ---------- Receipt photo: kept with the entry, not just used once for OCR ---------- */
+let pendingReceiptPhoto = null; // data URL, or null if this entry has no photo
+
+// A separate, much smaller capture than what OCR sees — OCR wants max legibility at higher
+// res; this is just "let me glance at what I scanned." Kept deliberately small: every entry's
+// photo lives inside the same single Firestore document as the rest of the budget, which caps
+// at 1MB total — at full size, a couple dozen scanned receipts could get uncomfortably close
+// to that ceiling. This size is a "many receipts, still fine" compromise, not a HD copy — if
+// heavy receipt-scanning becomes the norm, photos belong in real blob storage instead (Firebase
+// Storage), not embedded in the state document. That's a bigger change for another time.
+function makeReceiptThumbnail(file){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const maxDim = 640;
+      let { width, height } = img;
+      if(width > maxDim || height > maxDim){
+        const scale = maxDim / Math.max(width, height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/jpeg', 0.45));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('image load failed')); };
+    img.src = url;
+  });
+}
+function showLogPhoto(dataUrl){
+  pendingReceiptPhoto = dataUrl || null;
+  const wrap = document.getElementById('logPhotoPreview');
+  if(pendingReceiptPhoto){
+    document.getElementById('logPhotoImg').src = pendingReceiptPhoto;
+    wrap.style.display = 'block';
+  } else {
+    wrap.style.display = 'none';
+  }
+}
+function removeLogPhoto(){ showLogPhoto(null); }
+
 /* ---------- Taxes: multiple lines (GST + PST etc.), summed live into Total ---------- */
 let logTaxRows = [{label:'', amount:''}];
 
@@ -1596,6 +1645,7 @@ function clearLogForm(){
   logTaxRows = [{label:'', amount:''}];
   renderTaxRows();
   updateLogTotal();
+  showLogPhoto(null);
 }
 
 function updateEditModeUI(){
@@ -1625,6 +1675,7 @@ function openEntryForEdit(id){
   document.getElementById('logTip').value = entry.tip || '';
   updateLogTotal();
   document.getElementById('logNote').value = entry.note || '';
+  showLogPhoto(entry.receiptPhoto || null);
   updateEditModeUI();
   // Tapping a row can happen without the form's move into view registering at a
   // glance — flash the row itself and confirm with a toast so it's unmistakable.
@@ -1657,7 +1708,7 @@ function addLogEntry(){
   const note = document.getElementById('logNote').value;
   if(!amount || amount<=0){ showToast('Enter an amount.'); return; }
 
-  const fields = { date, bucket, amount, tax, taxes, tip, merchant, note };
+  const fields = { date, bucket, amount, tax, taxes, tip, merchant, note, receiptPhoto: pendingReceiptPhoto };
   if(editingEntryId){
     const entry = state.log.find(e=>e.id===editingEntryId);
     if(entry) Object.assign(entry, fields);
@@ -1851,10 +1902,11 @@ function setReceiptStatus(html){
   document.getElementById('receiptStatus').innerHTML = html;
 }
 
-// Grayscale + contrast boost before OCR — receipts photographed folded, at an angle, or
-// against a busy background read far better once the text is pushed toward pure black/white
-// instead of competing with background color noise. The original file is kept for the
-// on-screen preview; only the OCR pass sees the processed version.
+// Grayscale before OCR — plain color-noise removal, safe on virtually any photo. (A more
+// aggressive contrast boost was tried here and pulled back out: it helped some photos but
+// could blow out detail on others — shadows, glare, an angled shot — making text harder to
+// read than the original, not easier. Grayscale alone doesn't have that failure mode.)
+// The original file is kept for the on-screen preview; only the OCR pass sees this version.
 function preprocessReceiptImage(file){
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -1875,8 +1927,7 @@ function preprocessReceiptImage(file){
       const d = imageData.data;
       for(let i=0; i<d.length; i+=4){
         const gray = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
-        const contrasted = Math.min(255, Math.max(0, (gray - 128) * 1.6 + 128));
-        d[i] = d[i+1] = d[i+2] = contrasted;
+        d[i] = d[i+1] = d[i+2] = gray;
       }
       ctx.putImageData(imageData, 0, 0);
       URL.revokeObjectURL(url);
@@ -1899,6 +1950,7 @@ async function handleReceiptFile(file){
   try{
     await lazyLoadTesseract();
     const ocrInput = await preprocessReceiptImage(file).catch(()=>file); // fall back to the raw photo if preprocessing fails for any reason
+    makeReceiptThumbnail(file).then(showLogPhoto).catch(()=>{}); // saved with the entry so you can look back at what you scanned — don't block OCR on this
     const { createWorker } = window.Tesseract;
 
     // On a slow connection, the worker still needs to download its recognition engine and
