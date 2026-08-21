@@ -103,7 +103,14 @@
 
   .assumptions{margin-top:16px;padding-top:14px;border-top:1px solid var(--line);}
   .assumptions summary{font-size:12px;color:var(--ink-soft);cursor:pointer;font-weight:600;}
-  .projection summary{font-size:13px;color:var(--ink);}
+  .assumptions summary::-webkit-details-marker{display:none;}
+  .assumptions summary::before{content:"▸";display:inline-block;margin-right:6px;transition:transform .15s ease;font-size:10px;}
+  .assumptions[open] summary::before{transform:rotate(90deg);}
+  .projection summary{
+    font-size:14px;color:var(--ink);font-weight:600;padding:12px 14px;margin:0 -14px;
+    background:var(--paper);border-radius:10px;
+  }
+  .projection summary::before{margin-right:8px;font-size:11px;color:var(--electric);}
   .proj-summary{font-size:12px;color:var(--ink-soft);margin-bottom:10px;}
   .proj-chart-wrap{background:var(--paper);border-radius:10px;padding:10px 4px 2px;}
 

@@ -159,8 +159,17 @@
 
   .log-form{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
   @media(max-width:600px){.log-form{grid-template-columns:1fr 1fr;}}
-  .log-form input, .log-form select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--paper);font-size:14px;color:var(--ink);}
+  .log-form input, .log-form select{width:100%;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--paper);font-size:14px;color:var(--ink);}
   .log-form input:focus, .log-form select:focus{outline:1px solid var(--focus);}
+  .log-form input#logTotal{background:var(--good-soft);font-weight:700;color:var(--good);}
+  .tax-rows{display:flex;flex-direction:column;gap:8px;margin-bottom:8px;}
+  .tax-row{display:flex;gap:8px;align-items:center;}
+  .tax-row input.tax-label{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--paper);font-size:14px;color:var(--ink);}
+  .tax-row input.tax-amount{width:96px;flex-shrink:0;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--paper);font-size:14px;color:var(--ink);}
+  .tax-row input:focus{outline:1px solid var(--focus);}
+  .tax-row .tax-remove{background:none;border:none;color:var(--ink-soft);cursor:pointer;font-size:17px;padding:4px 6px;flex-shrink:0;}
+  .tax-row .tax-remove:hover{color:var(--bad);}
+  .tax-add-btn{background:none;border:none;color:var(--focus);font-size:12px;font-weight:600;cursor:pointer;padding:2px 0;}
 
   .receipt-preview{display:flex;gap:14px;align-items:flex-start;}
   .receipt-preview img{width:84px;height:84px;object-fit:cover;border-radius:9px;border:1px solid var(--line);flex-shrink:0;}
@@ -185,6 +194,7 @@
   .log-entry .le-amt.expense{color:var(--ink);}
   .log-entry .le-del{background:none;border:none;color:var(--ink-soft);cursor:pointer;font-size:15px;padding:2px 4px;flex-shrink:0;}
   .log-entry .le-del:hover{color:var(--bad);}
+  .log-entry.le-editing-flash{background:var(--good-soft); margin:0 -12px; padding-left:12px; padding-right:12px; border-radius:8px; transition:background .15s ease;}
   .log-empty{font-size:13px;color:var(--ink-soft);padding:8px 0;}
 
   .year-table{width:100%;border-collapse:collapse;font-size:11.5px;min-width:600px;}
@@ -436,9 +446,14 @@
                 <select id="logBucket"></select>
               </div>
               <div class="field-labeled" style="grid-column:1 / -1;"><label>Merchant</label><input type="text" id="logMerchant" placeholder="e.g. Shell, Sobeys"></div>
-              <div class="field-labeled"><label>Amount</label><input type="text" id="logAmount" placeholder="0"></div>
-              <div class="field-labeled"><label>Tax (optional)</label><input type="text" id="logTax" placeholder="0"></div>
-              <div class="field-labeled"><label>Tip (optional)</label><input type="text" id="logTip" placeholder="0"></div>
+              <div class="field-labeled"><label>Amount</label><input type="text" id="logAmount" placeholder="0" oninput="updateLogTotal()"></div>
+              <div class="field-labeled"><label>Tip (optional)</label><input type="text" id="logTip" placeholder="0" oninput="updateLogTotal()"></div>
+              <div class="field-labeled"><label>Total</label><input type="text" id="logTotal" placeholder="0" readonly></div>
+              <div class="field-labeled" style="grid-column:1 / -1;">
+                <label>Taxes (optional)</label>
+                <div id="logTaxRows" class="tax-rows"></div>
+                <button type="button" class="tax-add-btn" onclick="addTaxRow()">+ Add another tax</button>
+              </div>
               <div class="field-labeled" style="grid-column:1 / -1;"><label>Note (optional)</label><input type="text" id="logNote" placeholder="e.g. Friday night fares, oil change too"></div>
             </div>
             <div style="margin-top:12px;display:flex;gap:8px;">
@@ -1433,6 +1448,8 @@ function renderLogView(){
   const dateEl = document.getElementById('logDate');
   if(!dateEl.value) dateEl.value = todayISO();
 
+  if(!document.getElementById('logTaxRows').children.length){ renderTaxRows(); updateLogTotal(); }
+
   const bucketEl = document.getElementById('logBucket');
   bucketEl.innerHTML = logBucketOptions().map(b=>`<option value="${escapeAttr(b)}">${b}</option>`).join('');
 
@@ -1462,8 +1479,11 @@ function renderLogList(){
     listEl.innerHTML = Object.keys(groups).sort().reverse().map(ym=>{
       const rows = groups[ym].map(e=>{
         const isIncome = e.bucket==='Income';
+        const taxLabel = (e.taxes && e.taxes.length)
+          ? e.taxes.map(t=>`${fmt(t.amount)} ${t.label}`).join(' + ')
+          : (e.tax ? `${fmt(e.tax)} tax` : null);
         const taxTip = [
-          e.tax ? `${fmt(e.tax)} tax` : null,
+          taxLabel,
           e.tip ? `${fmt(e.tip)} tip` : null
         ].filter(Boolean).join(', ');
         const taxNote = taxTip ? ` <span style="color:var(--ink-soft);font-size:11px;">(incl. ${taxTip})</span>` : '';
@@ -1527,13 +1547,49 @@ function renderMerchantBreakdown(entries){
 
 let editingEntryId = null;
 
+/* ---------- Taxes: multiple lines (GST + PST etc.), summed live into Total ---------- */
+let logTaxRows = [{label:'', amount:''}];
+
+function renderTaxRows(){
+  const wrap = document.getElementById('logTaxRows');
+  wrap.innerHTML = logTaxRows.map((row,i)=>`
+    <div class="tax-row">
+      <input type="text" class="tax-label" placeholder="e.g. GST" value="${escapeAttr(row.label)}" data-idx="${i}">
+      <input type="text" class="tax-amount" placeholder="0" value="${escapeAttr(row.amount)}" data-idx="${i}">
+      ${logTaxRows.length>1 ? `<button type="button" class="tax-remove" data-idx="${i}" title="Remove">×</button>` : ''}
+    </div>
+  `).join('');
+  wrap.querySelectorAll('.tax-label').forEach(inp=>{
+    inp.addEventListener('input', e=>{ logTaxRows[+e.target.dataset.idx].label = e.target.value; });
+  });
+  wrap.querySelectorAll('.tax-amount').forEach(inp=>{
+    inp.addEventListener('input', e=>{ logTaxRows[+e.target.dataset.idx].amount = e.target.value; updateLogTotal(); });
+  });
+  wrap.querySelectorAll('.tax-remove').forEach(btn=>{
+    btn.addEventListener('click', e=>{
+      logTaxRows.splice(+e.currentTarget.dataset.idx, 1);
+      renderTaxRows(); updateLogTotal();
+    });
+  });
+}
+function addTaxRow(){ logTaxRows.push({label:'', amount:''}); renderTaxRows(); }
+function taxRowsSum(){ return logTaxRows.reduce((s,r)=> s + (parseFloat(r.amount)||0), 0); }
+function updateLogTotal(){
+  const amount = parseFloat(document.getElementById('logAmount').value)||0;
+  const tip = parseFloat(document.getElementById('logTip').value)||0;
+  const total = amount + taxRowsSum() + tip;
+  document.getElementById('logTotal').value = total ? total.toFixed(2) : '';
+}
+
 function clearLogForm(){
   document.getElementById('logAmount').value = '';
-  document.getElementById('logTax').value = '';
   document.getElementById('logTip').value = '';
   document.getElementById('logMerchant').value = '';
   document.getElementById('logNote').value = '';
   document.getElementById('logDate').value = todayISO();
+  logTaxRows = [{label:'', amount:''}];
+  renderTaxRows();
+  updateLogTotal();
 }
 
 function updateEditModeUI(){
@@ -1556,10 +1612,22 @@ function openEntryForEdit(id){
   document.getElementById('logMerchant').value = entry.merchant || '';
   document.getElementById('logBucket').value = entry.bucket || '';
   document.getElementById('logAmount').value = entry.amount || '';
-  document.getElementById('logTax').value = entry.tax || '';
+  logTaxRows = (entry.taxes && entry.taxes.length)
+    ? entry.taxes.map(t=>({label: t.label||'', amount: t.amount!=null ? String(t.amount) : ''}))
+    : (entry.tax ? [{label:'Tax', amount:String(entry.tax)}] : [{label:'', amount:''}]);
+  renderTaxRows();
   document.getElementById('logTip').value = entry.tip || '';
+  updateLogTotal();
   document.getElementById('logNote').value = entry.note || '';
   updateEditModeUI();
+  // Tapping a row can happen without the form's move into view registering at a
+  // glance — flash the row itself and confirm with a toast so it's unmistakable.
+  const clickedRow = document.querySelector(`.log-entry[data-id="${CSS.escape(id)}"]`);
+  if(clickedRow){
+    clickedRow.classList.add('le-editing-flash');
+    setTimeout(()=> clickedRow.classList.remove('le-editing-flash'), 900);
+  }
+  showToast('Editing this entry — update it in the form above.');
   const card = document.getElementById('logEntryCard');
   if(card) card.scrollIntoView({behavior:'smooth', block:'start'});
 }
@@ -1574,20 +1642,24 @@ function addLogEntry(){
   const date = document.getElementById('logDate').value || todayISO();
   const bucket = document.getElementById('logBucket').value;
   const amount = parseFloat(document.getElementById('logAmount').value);
-  const tax = parseFloat(document.getElementById('logTax').value) || null;
+  const taxes = logTaxRows
+    .filter(r => (parseFloat(r.amount)||0) > 0)
+    .map(r => ({ label: r.label.trim() || 'Tax', amount: parseFloat(r.amount) }));
+  const tax = taxes.length ? taxes.reduce((s,r)=>s+r.amount, 0) : null; // sum, kept for older code that reads a single number
   const tip = parseFloat(document.getElementById('logTip').value) || null;
   const merchant = document.getElementById('logMerchant').value.trim();
   const note = document.getElementById('logNote').value;
   if(!amount || amount<=0){ showToast('Enter an amount.'); return; }
 
+  const fields = { date, bucket, amount, tax, taxes, tip, merchant, note };
   if(editingEntryId){
     const entry = state.log.find(e=>e.id===editingEntryId);
-    if(entry) Object.assign(entry, { date, bucket, amount, tax, tip, merchant, note });
+    if(entry) Object.assign(entry, fields);
     editingEntryId = null;
     updateEditModeUI();
     showToast('Updated.');
   } else {
-    state.log.push({ id: 'l'+Date.now()+Math.random().toString(36).slice(2,7), date, bucket, amount, tax, tip, merchant, note });
+    state.log.push({ id: 'l'+Date.now()+Math.random().toString(36).slice(2,7), ...fields });
     showToast('Logged.');
   }
   saveLocal();
@@ -1724,13 +1796,26 @@ function parseReceiptText(text){
     if(m) amount = parseFloat(m[m.length-1].replace(/[^0-9.]/g,''));
   }
 
-  // Tax: HST/GST/PST/VAT line, kept separate from the amount — informational, not required
-  let tax = null;
-  const taxLine = lines.find(l => /\b(hst|gst|pst|vat|tax)\b/i.test(l) && !/subtotal/i.test(l));
-  if(taxLine){
-    const m = taxLine.match(amountRe);
-    if(m) tax = parseFloat(m[m.length-1].replace(/[^0-9.]/g,''));
+  // Tax: Canadian receipts often itemize GST + PST/QST separately rather than one combined
+  // line — look for each specifically first, and only fall back to a single generic "tax"
+  // line if none of those hit (avoids double-counting a combined-total tax line on top of
+  // itemized ones).
+  const taxes = [];
+  [['GST','gst'],['HST','hst'],['PST','pst'],['QST','qst'],['VAT','vat']].forEach(([label,kw])=>{
+    const line = lines.find(l => new RegExp('\\b'+kw+'\\b','i').test(l) && !/subtotal/i.test(l));
+    if(line){
+      const m = line.match(amountRe);
+      if(m) taxes.push({ label, amount: parseFloat(m[m.length-1].replace(/[^0-9.]/g,'')) });
+    }
+  });
+  if(taxes.length===0){
+    const taxLine = lines.find(l => /\btax\b/i.test(l) && !/subtotal/i.test(l));
+    if(taxLine){
+      const m = taxLine.match(amountRe);
+      if(m) taxes.push({ label:'Tax', amount: parseFloat(m[m.length-1].replace(/[^0-9.]/g,'')) });
+    }
   }
+  const tax = taxes.length ? taxes.reduce((s,t)=>s+t.amount,0) : null;
 
   // Tip: shown as its own line on restaurant/service receipts, informational like tax —
   // the amount above already includes it (that's what makes the debit-card-sale line correct).
@@ -1750,7 +1835,7 @@ function parseReceiptText(text){
   const bucket = guessBucket(lower);
   const date = parseReceiptDate(text);
 
-  return { amount, tax, tip, merchant, bucket, date, rawText: text };
+  return { amount, tax, taxes, tip, merchant, bucket, date, rawText: text };
 }
 
 function setReceiptStatus(html){
@@ -1835,11 +1920,15 @@ async function handleReceiptFile(file){
     const parsed = parseReceiptText(text);
 
     if(parsed.amount) document.getElementById('logAmount').value = parsed.amount.toFixed(2);
-    if(parsed.tax) document.getElementById('logTax').value = parsed.tax.toFixed(2);
+    if(parsed.taxes && parsed.taxes.length){
+      logTaxRows = parsed.taxes.map(t=>({label:t.label, amount:t.amount.toFixed(2)}));
+      renderTaxRows();
+    }
     if(parsed.tip) document.getElementById('logTip').value = parsed.tip.toFixed(2);
     if(parsed.merchant) document.getElementById('logMerchant').value = parsed.merchant;
     if(parsed.bucket) document.getElementById('logBucket').value = parsed.bucket;
     if(parsed.date) document.getElementById('logDate').value = parsed.date;
+    updateLogTotal();
 
     const statusText = document.getElementById('receiptStatusText');
     const found = [], missing = [];
@@ -2115,6 +2204,20 @@ function netStatus(net, incomeTotal){
   if(net>=0) return {label:'warn', color:PDF_COLORS.warn, soft:PDF_COLORS.warnSoft};
   return {label:'bad', color:PDF_COLORS.bad, soft:PDF_COLORS.badSoft};
 }
+// Every page after the first needs its own compact letterhead — page 1's tall
+// header (with subtitle + date) doesn't repeat, but the brand mark and a page
+// number do, so a reader flipping through a printed copy always knows where they are.
+function pdfNewPage(doc){
+  doc.addPage();
+  const pageNum = doc.internal.getNumberOfPages();
+  doc.setFillColor(...PDF_COLORS.ink); doc.rect(0,0,612,40,'F');
+  doc.setFont('times','bold'); doc.setFontSize(14); doc.setTextColor(...PDF_COLORS.white);
+  doc.text('Clearway', 40, 26);
+  doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COLORS.white);
+  doc.text(`Page ${pageNum}`, 572, 26, {align:'right'});
+  return 66;
+}
+
 function pdfFooter(doc, label){
   const pageCount = doc.internal.getNumberOfPages();
   for(let i=1;i<=pageCount;i++){
@@ -2179,11 +2282,11 @@ function buildSummaryDoc(){
   // Expenses, grouped by category
   const activeCats = state.catOrder.filter(c=>totalOf(state.expenses[c])>0);
   if(activeCats.length){
-    if(y > 680){ doc.addPage(); y = 50; }
+    if(y > 680){ y = pdfNewPage(doc); }
     doc.setFont('times','bold'); doc.setFontSize(13); doc.setTextColor(...PDF_COLORS.ink);
     doc.text('Expenses', 40, y); y += 10;
     activeCats.forEach(cat=>{
-      if(y > 700){ doc.addPage(); y = 50; }
+      if(y > 700){ y = pdfNewPage(doc); }
       doc.autoTable({
         startY: y, margin:{left:40,right:40},
         head:[[cat,'Frequency','Monthly']],
@@ -2205,7 +2308,7 @@ function buildSummaryDoc(){
 
   // Where it's going — simple bar chart
   if(activeCats.length){
-    if(y > 700){ doc.addPage(); y = 50; }
+    if(y > 700){ y = pdfNewPage(doc); }
     doc.setFont('times','bold'); doc.setFontSize(13); doc.setTextColor(...PDF_COLORS.ink);
     doc.text("Where it's going", 40, y); y += 20;
     const totals = activeCats.map(c=>({cat:c, total:totalOf(state.expenses[c])})).sort((a,b)=>b.total-a.total);
@@ -2223,7 +2326,7 @@ function buildSummaryDoc(){
   // Goals & notes
   if(state.notes && state.notes.trim()){
     y += 16;
-    if(y > 700){ doc.addPage(); y = 50; }
+    if(y > 700){ y = pdfNewPage(doc); }
     doc.setFont('times','bold'); doc.setFontSize(13); doc.setTextColor(...PDF_COLORS.ink);
     doc.text('Goals & notes', 40, y); y += 16;
     doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COLORS.ink);
@@ -2278,14 +2381,14 @@ function buildAccountingDoc(){
   });
   y = doc.lastAutoTable.finalY + 26;
 
-  if(y > 680){ doc.addPage(); y = 50; }
+  if(y > 680){ y = pdfNewPage(doc); }
   doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(...PDF_COLORS.ink);
   doc.text('EXPENSES', 40, y); y += 8;
 
   let expenseTotal = 0;
   const activeCats = state.catOrder.filter(c=>totalOf(state.expenses[c])>0);
   activeCats.forEach(cat=>{
-    if(y > 700){ doc.addPage(); y = 50; }
+    if(y > 700){ y = pdfNewPage(doc); }
     const catTotal = totalOf(state.expenses[cat]);
     expenseTotal += catTotal;
     const body = state.expenses[cat].filter(i=>i.name||parseFloat(i.amount)>0).map(i=>{
@@ -2307,7 +2410,7 @@ function buildAccountingDoc(){
   });
 
   y += 6;
-  if(y > 700){ doc.addPage(); y = 50; }
+  if(y > 700){ y = pdfNewPage(doc); }
   doc.setDrawColor(...PDF_COLORS.ink); doc.setLineWidth(1); doc.line(40, y, 572, y); y += 16;
   doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...PDF_COLORS.ink);
   doc.text('Total Expenses', 40, y);
@@ -2317,7 +2420,7 @@ function buildAccountingDoc(){
 
   // Net income box
   const net = incomeTotal - expenseTotal;
-  if(y > 700){ doc.addPage(); y = 50; }
+  if(y > 700){ y = pdfNewPage(doc); }
   doc.setFillColor(...PDF_COLORS.paper); doc.setDrawColor(...PDF_COLORS.ink);
   doc.roundedRect(40, y-20, 532, 46, 6, 6, 'FD');
   doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...PDF_COLORS.ink);
