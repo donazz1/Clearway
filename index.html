@@ -513,6 +513,19 @@
           <div class="card report-card">
             <div class="report-card-head">
               <div>
+                <h3>Detailed Summary Report</h3>
+                <p>Everything in the Summary Report, plus your full Activity Log — every receipt and one-off transaction, grouped by month. The real picture, not just the recurring plan.</p>
+              </div>
+            </div>
+            <div class="report-actions">
+              <button class="btn" onclick="previewReport('detailed')">Preview</button>
+              <button class="btn primary" onclick="downloadReport('detailed')">Download PDF</button>
+            </div>
+          </div>
+
+          <div class="card report-card">
+            <div class="report-card-head">
+              <div>
                 <h3>Accounting Summary</h3>
                 <p>An income-statement-style breakdown with monthly and annualized figures — the kind of format to hand to an accountant or use for taxes.</p>
               </div>
@@ -2289,7 +2302,7 @@ function pdfFooter(doc, label){
   }
 }
 
-function buildSummaryDoc(){
+function buildSummaryDoc(detailed){
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({unit:'pt', format:'letter'});
   const incomeTotal = totalOf(state.income);
@@ -2393,9 +2406,53 @@ function buildSummaryDoc(){
     doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COLORS.ink);
     const lines = doc.splitTextToSize(state.notes, 532);
     doc.text(lines, 40, y);
+    y += lines.length*11 + 10;
   }
 
-  pdfFooter(doc, 'Summary Report');
+  // Activity Log — every actual logged transaction (receipts, one-off expenses, income),
+  // not just the recurring plan. This is what makes it "detailed" vs. the plain Summary.
+  if(detailed && state.log && state.log.length){
+    y += 14;
+    if(y > 660){ y = pdfNewPage(doc); }
+    doc.setFont('times','bold'); doc.setFontSize(15); doc.setTextColor(...PDF_COLORS.ink);
+    doc.text('Activity Log', 40, y); y += 14;
+    doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COLORS.inkSoft);
+    doc.text('Every logged transaction, grouped by month — receipts, one-off expenses, and income.', 40, y);
+    y += 16;
+
+    const groups = {};
+    state.log.slice().sort((a,b)=>(a.date||'').localeCompare(b.date||'')).forEach(e=>{
+      const ym = monthKeyOf(e.date);
+      (groups[ym] = groups[ym] || []).push(e);
+    });
+
+    Object.keys(groups).sort().forEach(ym=>{
+      if(y > 680){ y = pdfNewPage(doc); }
+      const entries = groups[ym];
+      const monthTotal = entries.reduce((s,e)=> s + (e.bucket==='Income' ? (parseFloat(e.amount)||0) : -(parseFloat(e.amount)||0)), 0);
+      doc.setFont('times','bold'); doc.setFontSize(11); doc.setTextColor(...PDF_COLORS.ink);
+      doc.text(monthLabel(ym), 40, y); y += 8;
+      doc.autoTable({
+        startY: y, margin:{left:40,right:40},
+        head:[['Date','Category','Merchant / note','Amount']],
+        body: entries.map(e=>[
+          (e.date||'').slice(5),
+          e.bucket||'—',
+          e.merchant || e.note || '—',
+          (e.bucket==='Income'?'+':'-') + fmt(Math.abs(parseFloat(e.amount)||0))
+        ]),
+        foot:[['','','Month total', fmtAcct(monthTotal)]],
+        theme:'grid',
+        headStyles:{fillColor:PDF_COLORS.accent, textColor:PDF_COLORS.white, fontStyle:'bold', fontSize:8.5},
+        footStyles:{fillColor:PDF_COLORS.line, textColor:PDF_COLORS.ink, fontStyle:'bold', fontSize:8.5},
+        bodyStyles:{fontSize:8.5, textColor:PDF_COLORS.ink},
+        columnStyles:{0:{cellWidth:60}, 1:{cellWidth:140}, 2:{cellWidth:222}, 3:{cellWidth:110, halign:'right'}}
+      });
+      y = doc.lastAutoTable.finalY + 16;
+    });
+  }
+
+  pdfFooter(doc, detailed ? 'Detailed Summary Report' : 'Summary Report');
   return doc;
 }
 
@@ -2503,8 +2560,17 @@ function buildAccountingDoc(){
   return doc;
 }
 
-function buildReport(type){ return type==='accounting' ? buildAccountingDoc() : buildSummaryDoc(); }
+function buildReport(type){
+  if(type==='accounting') return buildAccountingDoc();
+  if(type==='detailed') return buildSummaryDoc(true);
+  return buildSummaryDoc(false);
+}
 
+const REPORT_FILENAMES = {
+  accounting: 'Accounting-Summary',
+  detailed: 'Detailed-Summary',
+  summary: 'Summary'
+};
 function previewReport(type){
   if(!window.jspdf){ showToast('PDF library failed to load.'); return; }
   const doc = buildReport(type);
@@ -2514,8 +2580,7 @@ function downloadReport(type){
   if(!window.jspdf){ showToast('PDF library failed to load.'); return; }
   const doc = buildReport(type);
   const dateStr = new Date().toISOString().slice(0,10);
-  const filename = type==='accounting' ? `Clearway-Accounting-Summary-${dateStr}.pdf` : `Clearway-Summary-${dateStr}.pdf`;
-  doc.save(filename);
+  doc.save(`Clearway-${REPORT_FILENAMES[type]||'Summary'}-${dateStr}.pdf`);
 }
 
 </script>
