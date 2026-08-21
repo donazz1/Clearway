@@ -164,9 +164,9 @@
   .log-form input#logTotal{background:var(--good-soft);font-weight:700;color:var(--good);}
   .tax-rows{display:flex;flex-direction:column;gap:8px;margin-bottom:8px;}
   .tax-row{display:flex;gap:8px;align-items:center;}
-  .tax-row input.tax-label{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--paper);font-size:14px;color:var(--ink);}
-  .tax-row input.tax-amount{width:96px;flex-shrink:0;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--paper);font-size:14px;color:var(--ink);}
-  .tax-row input:focus{outline:1px solid var(--focus);}
+  .tax-row select.tax-label{width:92px;flex-shrink:0;min-width:0;padding:10px 6px;border:1px solid var(--line);border-radius:9px;background:var(--paper);font-size:14px;color:var(--ink);}
+  .tax-row input.tax-amount{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--paper);font-size:14px;color:var(--ink);}
+  .tax-row select:focus, .tax-row input:focus{outline:1px solid var(--focus);}
   .tax-row .tax-remove{background:none;border:none;color:var(--ink-soft);cursor:pointer;font-size:17px;padding:4px 6px;flex-shrink:0;}
   .tax-row .tax-remove:hover{color:var(--bad);}
   .tax-add-btn{background:none;border:none;color:var(--focus);font-size:12px;font-weight:600;cursor:pointer;padding:2px 0;}
@@ -1550,17 +1550,23 @@ let editingEntryId = null;
 /* ---------- Taxes: multiple lines (GST + PST etc.), summed live into Total ---------- */
 let logTaxRows = [{label:'', amount:''}];
 
+const TAX_TYPES = ['HST','GST','PST','QST','VAT','Other'];
 function renderTaxRows(){
   const wrap = document.getElementById('logTaxRows');
-  wrap.innerHTML = logTaxRows.map((row,i)=>`
+  wrap.innerHTML = logTaxRows.map((row,i)=>{
+    const label = row.label && TAX_TYPES.includes(row.label) ? row.label : (row.label || 'HST');
+    return `
     <div class="tax-row">
-      <input type="text" class="tax-label" placeholder="e.g. GST" value="${escapeAttr(row.label)}" data-idx="${i}">
+      <select class="tax-label" data-idx="${i}">
+        ${TAX_TYPES.map(t=>`<option value="${t}" ${t===label?'selected':''}>${t}</option>`).join('')}
+      </select>
       <input type="text" class="tax-amount" placeholder="0" value="${escapeAttr(row.amount)}" data-idx="${i}">
       ${logTaxRows.length>1 ? `<button type="button" class="tax-remove" data-idx="${i}" title="Remove">×</button>` : ''}
-    </div>
-  `).join('');
-  wrap.querySelectorAll('.tax-label').forEach(inp=>{
-    inp.addEventListener('input', e=>{ logTaxRows[+e.target.dataset.idx].label = e.target.value; });
+    </div>`;
+  }).join('');
+  wrap.querySelectorAll('.tax-label').forEach(sel=>{
+    if(!logTaxRows[+sel.dataset.idx].label) logTaxRows[+sel.dataset.idx].label = sel.value; // default HST persists even if untouched
+    sel.addEventListener('change', e=>{ logTaxRows[+e.target.dataset.idx].label = e.target.value; });
   });
   wrap.querySelectorAll('.tax-amount').forEach(inp=>{
     inp.addEventListener('input', e=>{ logTaxRows[+e.target.dataset.idx].amount = e.target.value; updateLogTotal(); });
@@ -1614,7 +1620,7 @@ function openEntryForEdit(id){
   document.getElementById('logAmount').value = entry.amount || '';
   logTaxRows = (entry.taxes && entry.taxes.length)
     ? entry.taxes.map(t=>({label: t.label||'', amount: t.amount!=null ? String(t.amount) : ''}))
-    : (entry.tax ? [{label:'Tax', amount:String(entry.tax)}] : [{label:'', amount:''}]);
+    : (entry.tax ? [{label:'Other', amount:String(entry.tax)}] : [{label:'', amount:''}]);
   renderTaxRows();
   document.getElementById('logTip').value = entry.tip || '';
   updateLogTotal();
@@ -1812,7 +1818,7 @@ function parseReceiptText(text){
     const taxLine = lines.find(l => /\btax\b/i.test(l) && !/subtotal/i.test(l));
     if(taxLine){
       const m = taxLine.match(amountRe);
-      if(m) taxes.push({ label:'Tax', amount: parseFloat(m[m.length-1].replace(/[^0-9.]/g,'')) });
+      if(m) taxes.push({ label:'Other', amount: parseFloat(m[m.length-1].replace(/[^0-9.]/g,'')) });
     }
   }
   const tax = taxes.length ? taxes.reduce((s,t)=>s+t.amount,0) : null;
@@ -1832,7 +1838,10 @@ function parseReceiptText(text){
   const merchantCandidates = lines.filter(l => l.length>=3 && !/^\d+$/.test(l) && /[a-zA-Z]{2,}/.test(l));
   const merchant = merchantCandidates.find(l => !GENERIC_RECEIPT_HEADERS.test(l.trim())) || merchantCandidates[0] || '';
 
-  const bucket = guessBucket(lower);
+  // Guessing the category touches live app state (catOrder) — if that ever throws for any
+  // reason, it must not take down everything else already successfully read off the receipt.
+  let bucket = null;
+  try{ bucket = guessBucket(lower); }catch(e){ console.error('guessBucket failed:', e); }
   const date = parseReceiptDate(text);
 
   return { amount, tax, taxes, tip, merchant, bucket, date, rawText: text };
