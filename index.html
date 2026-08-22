@@ -668,6 +668,7 @@
     setPersistence, indexedDBLocalPersistence, browserLocalPersistence,
     deleteUser, reauthenticateWithCredential, EmailAuthProvider
   } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-auth.js";
+  import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-functions.js";
 
   // Shared with the CarBook project (Clearway hit the Firebase project-count quota, so this
   // reuses CarBook's Auth + Firestore rather than a dedicated project). Clearway's data lives
@@ -691,10 +692,16 @@
   const firestore = initializeFirestore(app, {
     localCache: persistentLocalCache({ tabManager: persistentSingleTabManager() })
   });
+  const functions = getFunctions(app);
+  const scanReceiptCallable = httpsCallable(functions, 'scanReceipt');
 
   window.fb = {
     auth, firestore,
     onAuthStateChanged, signOut, doc, getDoc, setDoc, deleteDoc, onSnapshot,
+    async scanReceipt(imageBase64){
+      const result = await scanReceiptCallable({ imageBase64 });
+      return result.data;
+    },
     async signIn(email, password){ return signInWithEmailAndPassword(auth, email, password); },
     async signUp(email, password){ return createUserWithEmailAndPassword(auth, email, password); },
     async resetPassword(email){ return sendPasswordResetEmail(auth, email); },
@@ -1746,27 +1753,11 @@ function addLogEntry(){
 }
 
 /* ---------- Receipt scanning (Tier 1: on-device OCR, confirm-before-save) ---------- */
-let tesseractLoadPromise = null;
 function withTimeout(promise, ms, timeoutMessage){
   return new Promise((resolve, reject)=>{
     const timer = setTimeout(()=>reject(new Error(timeoutMessage)), ms);
     promise.then(v=>{ clearTimeout(timer); resolve(v); }, e=>{ clearTimeout(timer); reject(e); });
   });
-}
-
-function lazyLoadTesseract(){
-  if(window.Tesseract) return Promise.resolve();
-  if(tesseractLoadPromise) return tesseractLoadPromise;
-  const loadPromise = new Promise((resolve, reject)=>{
-    const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js';
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error('Could not load the receipt reader — check your internet connection.'));
-    document.head.appendChild(s);
-  });
-  tesseractLoadPromise = withTimeout(loadPromise, 15000, "This is taking too long to load — weak signal? Try again when you've got a stronger connection.")
-    .catch(err => { tesseractLoadPromise = null; throw err; }); // don't cache a failed attempt — let the next tap retry cleanly
-  return tesseractLoadPromise;
 }
 
 // Keyword → default category name. Checked in this order — more specific categories first,
@@ -1785,11 +1776,6 @@ const RECEIPT_KEYWORDS = {
 // Pharmacy/medical receipts get checked FIRST and independently — these often contain a
 // big-box store name (e.g. "Costco Pharmacy") that would otherwise wrongly match groceries.
 const PHARMACY_SIGNALS = ['pharmacy','prescription','dispensing fee','patient pays','rx:','din:','shoppers drug mart','rexall','walk-in clinic','ontario drug benefit','apo-'];
-
-// Phrases that indicate "what was actually paid", checked in priority order — always
-// ahead of a generic "total", since a total can be the pre-insurance amount, or (on a
-// restaurant bill) the pre-tip amount — the card-sale line is the true final charge.
-const AMOUNT_PRIORITY_KEYWORDS = ['debit card sale','credit card sale','card sale','amount charged','patient pays','patient pay','you pay','amount due','amount paid','balance due','copay'];
 
 // Finds the real category name in this account matching a canonical concept, even if the
 // user renamed or extended it (e.g. "Dining Out & Take Out" should still match "Dining Out") —
@@ -1814,126 +1800,20 @@ function guessBucket(lower){
   return null;
 }
 
-// Pulls a date off the receipt itself, not the day it happened to be scanned — a receipt
-// from yesterday shouldn't get logged as today just because that's when the photo was taken.
-function parseReceiptDate(text){
-  const MONTHS = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
-  let year, month, day;
-
-  let m = text.match(/\b(\d{1,2})[\s-](jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s-](\d{4})\b/i);
-  if(m){ day=parseInt(m[1],10); month=MONTHS[m[2].toLowerCase().slice(0,3)]; year=parseInt(m[3],10); }
-
-  if(!month){
-    m = text.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s.]+(\d{1,2}),?\s+(\d{4})\b/i);
-    if(m){ month=MONTHS[m[1].toLowerCase().slice(0,3)]; day=parseInt(m[2],10); year=parseInt(m[3],10); }
-  }
-
-  if(!month){
-    m = text.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
-    if(m){ year=parseInt(m[1],10); month=parseInt(m[2],10); day=parseInt(m[3],10); }
-  }
-
-  if(!month){
-    m = text.match(/\b(\d{1,2})[\/](\d{1,2})[\/](\d{4})\b/);
-    if(m){
-      let a=parseInt(m[1],10), b=parseInt(m[2],10);
-      year=parseInt(m[3],10); month=a; day=b;
-      if(a > 12 && b <= 12){ month=b; day=a; } // first number can't be a month, so it must be the day
-    }
-  }
-
-  if(!month || month<1 || month>12 || !day || day<1 || day>31) return null;
-
-  const iso = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-  const parsedTime = new Date(iso+'T00:00:00').getTime();
-  const now = Date.now();
-  const threeYearsMs = 3*365*24*60*60*1000;
-  if(isNaN(parsedTime) || parsedTime > now+86400000 || parsedTime < now-threeYearsMs) return null; // implausible — likely an OCR misread, don't trust it
-  return iso;
-}
-
-function parseReceiptText(text){
-  const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
-  const lower = text.toLowerCase();
-  const amountRe = /\$?\s?(\d{1,4}[.,]\d{2})\b/g;
-
-  // Amount: what-you-actually-paid keywords win over a generic "total" (insurance may cover
-  // most of it, or a tip may sit after the total) — if nothing keyword-based is found, leave
-  // it blank rather than guessing from the largest number on the page (DINs, doctor IDs, etc).
-  let amount = null;
-  let matchedLine = null;
-  for(const kw of AMOUNT_PRIORITY_KEYWORDS){
-    matchedLine = lines.find(l => l.toLowerCase().includes(kw));
-    if(matchedLine) break;
-  }
-  if(!matchedLine){
-    matchedLine = lines.find(l => /total/i.test(l) && !/subtotal/i.test(l));
-  }
-  if(matchedLine){
-    const m = matchedLine.match(amountRe);
-    if(m) amount = parseFloat(m[m.length-1].replace(/[^0-9.]/g,''));
-  }
-
-  // Tax: Canadian receipts often itemize GST + PST/QST separately rather than one combined
-  // line — look for each specifically first, and only fall back to a single generic "tax"
-  // line if none of those hit (avoids double-counting a combined-total tax line on top of
-  // itemized ones).
-  const taxes = [];
-  [['GST','gst'],['HST','hst'],['PST','pst'],['QST','qst'],['VAT','vat']].forEach(([label,kw])=>{
-    const line = lines.find(l => new RegExp('\\b'+kw+'\\b','i').test(l) && !/subtotal/i.test(l));
-    if(line){
-      const m = line.match(amountRe);
-      if(m) taxes.push({ label, amount: parseFloat(m[m.length-1].replace(/[^0-9.]/g,'')) });
-    }
-  });
-  if(taxes.length===0){
-    const taxLine = lines.find(l => /\btax\b/i.test(l) && !/subtotal/i.test(l));
-    if(taxLine){
-      const m = taxLine.match(amountRe);
-      if(m) taxes.push({ label:'HST', amount: parseFloat(m[m.length-1].replace(/[^0-9.]/g,'')) });
-    }
-  }
-  const tax = taxes.length ? taxes.reduce((s,t)=>s+t.amount,0) : null;
-
-  // Tip: shown as its own line on restaurant/service receipts, informational like tax —
-  // the amount above already includes it (that's what makes the debit-card-sale line correct).
-  let tip = null;
-  const tipLine = lines.find(l => /\btip\b/i.test(l) && !/\bno\s+tip\b/i.test(l));
-  if(tipLine){
-    const m = tipLine.match(amountRe);
-    if(m) tip = parseFloat(m[m.length-1].replace(/[^0-9.]/g,''));
-  }
-
-  // Merchant: first substantial line that looks like real text — skipping generic
-  // receipt-header boilerplate that isn't actually the business name.
-  const GENERIC_RECEIPT_HEADERS = /^(transaction record|receipt|tax invoice|sales receipt|invoice|order confirmation|customer copy|merchant copy|official (prescription )?receipt)$/i;
-  const merchantCandidates = lines.filter(l => l.length>=3 && !/^\d+$/.test(l) && /[a-zA-Z]{2,}/.test(l));
-  const merchant = merchantCandidates.find(l => !GENERIC_RECEIPT_HEADERS.test(l.trim())) || merchantCandidates[0] || '';
-
-  // Guessing the category touches live app state (catOrder) — if that ever throws for any
-  // reason, it must not take down everything else already successfully read off the receipt.
-  let bucket = null;
-  try{ bucket = guessBucket(lower); }catch(e){ console.error('guessBucket failed:', e); }
-  const date = parseReceiptDate(text);
-
-  return { amount, tax, taxes, tip, merchant, bucket, date, rawText: text };
-}
-
 function setReceiptStatus(html){
   document.getElementById('receiptStatus').innerHTML = html;
 }
 
-// Grayscale before OCR — plain color-noise removal, safe on virtually any photo. (A more
-// aggressive contrast boost was tried here and pulled back out: it helped some photos but
-// could blow out detail on others — shadows, glare, an angled shot — making text harder to
-// read than the original, not easier. Grayscale alone doesn't have that failure mode.)
-// The original file is kept for the on-screen preview; only the OCR pass sees this version.
-function preprocessReceiptImage(file){
+// Resized, full-color copy for Veryfi — no grayscale/contrast munging here, unlike the old
+// Tesseract path: Veryfi does its own image preprocessing server-side, and a plain color
+// photo gives it more to work with than an already-degraded one. Sized down only to keep
+// the upload reasonably small, not for legibility.
+function prepareReceiptForVeryfi(file){
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
     img.onload = () => {
-      const maxDim = 1800; // cap size so OCR stays fast on large phone photos
+      const maxDim = 2000;
       let { width, height } = img;
       if(width > maxDim || height > maxDim){
         const scale = maxDim / Math.max(width, height);
@@ -1942,17 +1822,10 @@ function preprocessReceiptImage(file){
       }
       const canvas = document.createElement('canvas');
       canvas.width = width; canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, width, height);
-      const imageData = ctx.getImageData(0, 0, width, height);
-      const d = imageData.data;
-      for(let i=0; i<d.length; i+=4){
-        const gray = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
-        d[i] = d[i+1] = d[i+2] = gray;
-      }
-      ctx.putImageData(imageData, 0, 0);
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
       URL.revokeObjectURL(url);
-      canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('blank canvas')), 'image/jpeg', 0.92);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      resolve(dataUrl.split(',')[1]); // strip the "data:image/jpeg;base64," prefix — Veryfi wants raw base64
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('image load failed')); };
     img.src = url;
@@ -1969,57 +1842,44 @@ async function handleReceiptFile(file){
     </div>
   `);
   try{
-    await lazyLoadTesseract();
-    const ocrInput = await preprocessReceiptImage(file).catch(()=>file); // fall back to the raw photo if preprocessing fails for any reason
-    makeReceiptThumbnail(file).then(showLogPhoto).catch(()=>{}); // saved with the entry so you can look back at what you scanned — don't block OCR on this
-    const { createWorker } = window.Tesseract;
+    const imageBase64 = await prepareReceiptForVeryfi(file);
+    makeReceiptThumbnail(file).then(showLogPhoto).catch(()=>{}); // saved with the entry so you can look back at what you scanned — don't block scanning on this
 
-    // On a slow connection, the worker still needs to download its recognition engine and
-    // language data (several MB) before it can even start reading — that can take a while
-    // even when it's going to succeed, so give a progress cue rather than let it look frozen.
     const progressTimer = setTimeout(()=>{
       const el = document.getElementById('receiptStatusText');
-      if(el && el.textContent === 'Reading receipt…') el.textContent = 'Still working — downloading the reader on a slow connection can take a bit…';
-    }, 6000);
+      if(el && el.textContent === 'Reading receipt…') el.textContent = 'Still working — this can take a few seconds…';
+    }, 4000);
 
-    const recognizeText = (async () => {
-      const worker = await createWorker('eng');
-      try{
-        const { data } = await worker.recognize(ocrInput);
-        return data.text;
-      } finally {
-        worker.terminate();
-      }
-    })();
-
-    let text;
+    let parsed;
     try{
-      text = await withTimeout(recognizeText, 60000, "This is taking too long — weak signal? Try again once you've got a stronger connection.");
+      parsed = await withTimeout(fb.scanReceipt(imageBase64), 30000, "This is taking too long — weak signal? Try again once you've got a stronger connection.");
     } finally {
       clearTimeout(progressTimer);
     }
 
-    const parsed = parseReceiptText(text);
+    // Veryfi doesn't know Clearway's categories — keep guessing the bucket locally,
+    // same keyword logic as before, just fed by the merchant name Veryfi extracted.
+    const bucket = guessBucket(((parsed.merchant||'') + ' ' + (parsed.rawText||'')).toLowerCase());
 
     if(parsed.amount) document.getElementById('logAmount').value = parsed.amount.toFixed(2);
     if(parsed.taxes && parsed.taxes.length){
-      logTaxRows = parsed.taxes.map(t=>({label:t.label, amount:t.amount.toFixed(2)}));
+      logTaxRows = parsed.taxes.map(t=>({label:t.label, amount:Number(t.amount).toFixed(2)}));
       renderTaxRows();
     }
     if(parsed.tip) document.getElementById('logTip').value = parsed.tip.toFixed(2);
     if(parsed.merchant) document.getElementById('logMerchant').value = parsed.merchant;
-    if(parsed.bucket) document.getElementById('logBucket').value = parsed.bucket;
+    if(bucket) document.getElementById('logBucket').value = bucket;
     if(parsed.date) document.getElementById('logDate').value = parsed.date;
     updateLogTotal();
 
     const statusText = document.getElementById('receiptStatusText');
     const found = [], missing = [];
     if(parsed.amount) found.push('amount'); else missing.push('amount');
-    if(parsed.tax) found.push('tax');
+    if(parsed.taxes && parsed.taxes.length) found.push('tax');
     if(parsed.tip) found.push('tip');
     if(parsed.date) found.push('date');
     if(parsed.merchant) found.push('merchant'); else missing.push('merchant');
-    if(parsed.bucket) found.push('category'); else missing.push('category');
+    if(bucket) found.push('category'); else missing.push('category');
 
     function joinWithAnd(arr){
       if(arr.length<=1) return arr.join('');
@@ -2036,9 +1896,11 @@ async function handleReceiptFile(file){
       statusText.className = 'receipt-status-text ready';
       statusText.textContent = `Got the ${joinWithAnd(found)}. Couldn't tell the ${joinWithAnd(missing)} — fill that in below.`;
     }
-    document.getElementById('receiptStatus').insertAdjacentHTML('beforeend', `
-      <details class="receipt-raw"><summary>What it read</summary><pre>${escapeAttr(text || '(no text found)')}</pre></details>
-    `);
+    if(parsed.rawText){
+      document.getElementById('receiptStatus').insertAdjacentHTML('beforeend', `
+        <details class="receipt-raw"><summary>What it read</summary><pre>${escapeAttr(parsed.rawText)}</pre></details>
+      `);
+    }
   }catch(e){
     setReceiptStatus(`<div class="receipt-status-text error">${escapeAttr(e.message || "Couldn't read that receipt — enter it manually below.")}</div>`);
   }
