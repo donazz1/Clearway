@@ -1,0 +1,10 @@
+{
+  "name": "clearway-functions",
+  "description": "Server-side pieces for Clearway that need a secret kept off the client — right now, just the Veryfi receipt-scan proxy.",
+  "engines": { "node": "20" },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-functions": "^6.0.1"
+  },
+  "private": true
+}
