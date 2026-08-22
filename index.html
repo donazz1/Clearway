@@ -2305,6 +2305,18 @@ function pdfFooter(doc, label){
   }
 }
 
+// autoTable's columnStyles halign doesn't reliably reach header cells the way it does
+// body/foot cells — left to itself, a numeric column's header label sits at the left
+// of its column while the figures below it sit at the right, so they don't share an
+// edge. Real financial statements right-align the header over its numbers. Force it.
+function rightAlignHeaderCols(colIndexes){
+  return function(data){
+    if(data.section==='head' && colIndexes.includes(data.column.index)){
+      data.cell.styles.halign = 'right';
+    }
+  };
+}
+
 function buildSummaryDoc(detailed){
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({unit:'pt', format:'letter'});
@@ -2351,7 +2363,8 @@ function buildSummaryDoc(detailed){
       headStyles:{fillColor:PDF_COLORS.ink, textColor:PDF_COLORS.white, fontStyle:'bold', fontSize:9},
       footStyles:{fillColor:PDF_COLORS.goodSoft, textColor:PDF_COLORS.ink, fontStyle:'bold', fontSize:9},
       bodyStyles:{fontSize:9, textColor:PDF_COLORS.ink},
-      columnStyles:{0:{cellWidth:310}, 1:{cellWidth:110}, 2:{cellWidth:112, halign:'right'}}
+      columnStyles:{0:{cellWidth:310}, 1:{cellWidth:110}, 2:{cellWidth:112, halign:'right'}},
+      didParseCell: rightAlignHeaderCols([2])
     });
     y = doc.lastAutoTable.finalY + 22;
   }
@@ -2371,7 +2384,8 @@ function buildSummaryDoc(detailed){
         theme:'grid',
         headStyles:{fillColor:PDF_COLORS.accent, textColor:PDF_COLORS.white, fontStyle:'bold', fontSize:9},
         bodyStyles:{fontSize:9, textColor:PDF_COLORS.ink},
-        columnStyles:{0:{cellWidth:310}, 1:{cellWidth:110}, 2:{cellWidth:112, halign:'right'}}
+        columnStyles:{0:{cellWidth:310}, 1:{cellWidth:110}, 2:{cellWidth:112, halign:'right'}},
+        didParseCell: rightAlignHeaderCols([2])
       });
       y = doc.lastAutoTable.finalY + 14;
     });
@@ -2449,7 +2463,8 @@ function buildSummaryDoc(detailed){
         headStyles:{fillColor:PDF_COLORS.accent, textColor:PDF_COLORS.white, fontStyle:'bold', fontSize:8.5},
         footStyles:{fillColor:PDF_COLORS.line, textColor:PDF_COLORS.ink, fontStyle:'bold', fontSize:8.5},
         bodyStyles:{fontSize:8.5, textColor:PDF_COLORS.ink},
-        columnStyles:{0:{cellWidth:60}, 1:{cellWidth:140}, 2:{cellWidth:222}, 3:{cellWidth:110, halign:'right'}}
+        columnStyles:{0:{cellWidth:60}, 1:{cellWidth:140}, 2:{cellWidth:222}, 3:{cellWidth:110, halign:'right'}},
+        didParseCell: rightAlignHeaderCols([3])
       });
       y = doc.lastAutoTable.finalY + 16;
     });
@@ -2498,7 +2513,8 @@ function buildAccountingDoc(){
     headStyles:{fontStyle:'bold', fontSize:9, textColor:PDF_COLORS.ink, lineWidth:{bottom:1}, lineColor:PDF_COLORS.ink},
     footStyles:{fontStyle:'bold', fontSize:9, textColor:PDF_COLORS.ink, lineWidth:{top:1}, lineColor:PDF_COLORS.ink},
     bodyStyles:{fontSize:9, textColor:PDF_COLORS.ink},
-    columnStyles:{0:{cellWidth:COL_DESC_W}, 1:{cellWidth:COL_MONTHLY_W, halign:'right'}, 2:{cellWidth:COL_ANNUAL_W, halign:'right'}}
+    columnStyles:{0:{cellWidth:COL_DESC_W}, 1:{cellWidth:COL_MONTHLY_W, halign:'right'}, 2:{cellWidth:COL_ANNUAL_W, halign:'right'}},
+    didParseCell: rightAlignHeaderCols([1,2])
   });
   y = doc.lastAutoTable.finalY + 26;
 
@@ -2525,7 +2541,8 @@ function buildAccountingDoc(){
       headStyles:{fontStyle:'bold', fontSize:9, textColor:PDF_COLORS.inkSoft, lineWidth:{bottom:0.5}, lineColor:PDF_COLORS.line},
       footStyles:{fontStyle:'italic', fontSize:8.5, textColor:PDF_COLORS.inkSoft, lineWidth:{top:0.5}, lineColor:PDF_COLORS.line},
       bodyStyles:{fontSize:9, textColor:PDF_COLORS.ink},
-      columnStyles:{0:{cellWidth:COL_DESC_W}, 1:{cellWidth:COL_MONTHLY_W, halign:'right'}, 2:{cellWidth:COL_ANNUAL_W, halign:'right'}}
+      columnStyles:{0:{cellWidth:COL_DESC_W}, 1:{cellWidth:COL_MONTHLY_W, halign:'right'}, 2:{cellWidth:COL_ANNUAL_W, halign:'right'}},
+      didParseCell: rightAlignHeaderCols([1,2])
     });
     y = doc.lastAutoTable.finalY + 12;
   });
