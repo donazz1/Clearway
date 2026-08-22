@@ -733,6 +733,11 @@ async function checkForNewVersion(){
 }
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') checkForNewVersion(); });
 window.addEventListener('pageshow', e=>{ if(e.persisted) checkForNewVersion(); });
+// iOS Safari's visibility/pageshow events are unreliable specifically for standalone
+// "Add to Home Screen" apps (exactly the case this whole mechanism exists for) — don't
+// depend on them alone. A periodic check while the app is open catches it regardless.
+setInterval(checkForNewVersion, 3*60*1000);
+checkForNewVersion(); // also check right away — covers a resumed session that's already stale on open
 
 /* =========================================================
    Storage model
