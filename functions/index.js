@@ -1,5 +1,6 @@
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
+const logger = require('firebase-functions/logger');
 
 const VERYFI_CLIENT_ID = defineSecret('VERYFI_CLIENT_ID');
 const VERYFI_USERNAME = defineSecret('VERYFI_USERNAME');
@@ -42,6 +43,7 @@ exports.scanReceipt = onCall(
     }
 
     const data = await res.json();
+    logger.info('Veryfi response', { keys: Object.keys(data), data });
 
     // Defensive field lookups — Veryfi's exact response shape wasn't fully confirmable
     // from public docs alone, so this checks a few plausible field names per value
