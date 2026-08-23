@@ -74,19 +74,57 @@ exports.scanReceipt = onCall(
     // whatever total figure exists if Veryfi genuinely didn't extract a subtotal at all.
     const amount = subtotal ?? receiptTotal;
 
+    // Tax type labels: Veryfi's tax_lines entries frequently come back with name:null
+    // and no other type field at all (confirmed on a real receipt — an Ontario 13% HST
+    // line and a 5% "HST-F" line, both name:null, only a numeric `rate` to go on). The
+    // real label is usually still sitting in the OCR text itself, so pull it from there
+    // first, in the order it appears; a rate-based guess is the last resort before
+    // falling all the way back to the generic "Tax".
+    const CA_TAX_RATE_NAMES = { 13: 'HST', 15: 'HST', 12: 'HST', 5: 'GST', 7: 'PST', 9.975: 'QST', 14.975: 'HST' };
+    // Pairs each tax-type keyword with whatever number sits right after it on the receipt,
+    // so a receipt listing both "GST 0" and "HST 3" doesn't get its single implied tax
+    // mislabeled as GST just because GST happened to print first.
+    function findTaxLabelsInText(text) {
+      const pairs = [];
+      const re = /\b(HST-F|HST|GST|PST|QST|VAT)\b[^\d\n]{0,12}?([\d,]+\.?\d{0,2})/gi;
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        pairs.push({ label: m[1].toUpperCase(), amount: parseFloat(m[2].replace(/,/g, '')) });
+      }
+      return pairs;
+    }
+    const textTaxPairs = findTaxLabelsInText(ocrText);
+    const textTaxLabels = textTaxPairs.map(p => p.label);
+    function taxLabelFor(rawLabel, rate, idx) {
+      if (rawLabel) return rawLabel;
+      if (textTaxLabels[idx]) return textTaxLabels[idx];
+      if (rate != null && CA_TAX_RATE_NAMES[rate]) return CA_TAX_RATE_NAMES[rate];
+      return 'Tax';
+    }
+    // For a single implied tax figure (no structured tax_lines at all), pick whichever
+    // text-extracted tax pair's own amount is closest to it, rather than just the first
+    // one that appears in the text.
+    function bestTaxLabelForAmount(amount) {
+      if (!textTaxPairs.length) return 'Tax';
+      return textTaxPairs.slice().sort((a, b) => Math.abs(a.amount - amount) - Math.abs(b.amount - amount))[0].label;
+    }
+
     // Tax: prefer Veryfi's own structured tax lines (can be more than one — HST + a
     // second provincial line, both confirmed coming through correctly on a real receipt).
     // When those come back empty, the gap between the real total and the subtotal is the
     // tax, even when Veryfi couldn't isolate the individual line itself.
     let taxes = Array.isArray(data.tax_lines) && data.tax_lines.length
-      ? data.tax_lines.map(t => ({ label: t.name || t.code || 'Tax', amount: Number(t.total ?? t.amount ?? 0) }))
+      ? data.tax_lines.map((t, idx) => ({
+          label: taxLabelFor(t.name || t.code, t.rate, idx),
+          amount: Number(t.total ?? t.amount ?? 0)
+        }))
       : [];
     if (!taxes.length && typeof data.tax === 'number' && data.tax > 0) {
-      taxes = [{ label: 'Tax', amount: data.tax }];
+      taxes = [{ label: bestTaxLabelForAmount(data.tax), amount: data.tax }];
     }
     if (!taxes.length && subtotal != null && receiptTotal != null) {
       const implied = Math.round((receiptTotal - subtotal) * 100) / 100;
-      if (implied > 0.01) taxes = [{ label: 'Tax', amount: implied }];
+      if (implied > 0.01) taxes = [{ label: bestTaxLabelForAmount(implied), amount: implied }];
     }
 
     return {
