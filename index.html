@@ -470,6 +470,23 @@
             <div id="receiptStatus" style="margin-top:14px;"></div>
           </div>
 
+          <div class="card">
+            <h3>Reconcile a statement</h3>
+            <p style="font-size:13px;color:var(--ink-soft);margin:0 0 14px;line-height:1.5;">
+              Upload a bank or credit-card statement PDF and Clearway checks it against what you've already logged — anything missing shows up as a quick add-it list. Runs entirely in your browser; the PDF is never uploaded anywhere. Extraction is best-effort — statement formats vary, so double-check the results below before adding anything.
+            </p>
+            <input type="file" accept="application/pdf" id="statementInput" style="display:none;">
+            <button class="btn primary" onclick="document.getElementById('statementInput').click()">📄 Upload statement</button>
+            <div id="statementStatus" style="margin-top:14px;"></div>
+            <div id="statementResults" style="display:none;margin-top:14px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                <strong style="font-size:13px;" id="statementSummary"></strong>
+                <button class="btn" id="statementAddAllBtn" style="padding:6px 12px;font-size:12px;">Add all</button>
+              </div>
+              <div id="statementUnmatchedList"></div>
+            </div>
+          </div>
+
           <div class="card" id="returnWindowCard" style="display:none;">
             <h3>⏰ Return windows closing soon</h3>
             <p style="font-size:12px;color:var(--ink-soft);margin:0 0 12px;line-height:1.5;">
@@ -759,6 +776,37 @@
   // means it isn't guaranteed to run after this deferred module script. Signal readiness
   // explicitly rather than relying on execution order.
   window.dispatchEvent(new Event('fb-ready'));
+</script>
+
+<script type="module">
+  // Statement reconciliation reads a bank/card statement PDF entirely client-side —
+  // no server upload, nothing leaves the browser. Most statement PDFs have a real
+  // text layer (they're generated, not scanned), so text extraction works without OCR.
+  import * as pdfjsLib from 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.2.108/pdf.min.mjs';
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.2.108/pdf.worker.min.mjs';
+
+  // Reconstructs visual lines from pdf.js's flat item list by clustering text items
+  // that share a y-coordinate (pdf.js gives reading-order items, not real line breaks),
+  // then sorting each line left-to-right by x-coordinate.
+  window.extractPdfLines = async function(file){
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    const lines = [];
+    for(let i=1; i<=pdf.numPages; i++){
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const rows = {};
+      content.items.forEach(item => {
+        const y = Math.round(item.transform[5]);
+        (rows[y] = rows[y] || []).push(item);
+      });
+      Object.keys(rows).map(Number).sort((a,b)=>b-a).forEach(y => {
+        const line = rows[y].sort((a,b)=>a.transform[4]-b.transform[4]).map(it=>it.str).join(' ').replace(/\s+/g,' ').trim();
+        if(line) lines.push(line);
+      });
+    }
+    return lines;
+  };
 </script>
 
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
@@ -1670,6 +1718,137 @@ function renderRecurringCandidates(){
   list.querySelectorAll('[data-mark]').forEach(btn => btn.addEventListener('click', () => markMerchantRecurring(btn.dataset.mark)));
   list.querySelectorAll('[data-dismiss]').forEach(btn => btn.addEventListener('click', () => dismissRecurringCandidate(btn.dataset.dismiss)));
 }
+
+/* ---------- Statement reconciliation ----------
+   Parses transaction lines out of a bank/card statement PDF (extracted client-side via
+   pdf.js — see the module script near the top of the file) and checks each one against
+   what's already in state.log. Best-effort: statement layouts vary a lot bank to bank,
+   so this is a generic "date ... description ... amount" line matcher, not a per-bank
+   parser — the results are shown for review, nothing is added without the user acting
+   on it. Credits/payments (marked CR, or a leading minus) are skipped entirely; those
+   aren't purchases to reconcile against receipts. */
+const STATEMENT_MONTHS = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+const STATEMENT_LINE_RE = /^(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|[A-Za-z]{3,9}\.?\s+\d{1,2}(?:,?\s*\d{4})?)\s+(.+?)\s+(-?\$?[\d,]+\.\d{2})\s*(CR)?$/i;
+
+function parseStatementDateToken(tok){
+  const currentYear = new Date().getFullYear();
+  let m = tok.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/);
+  if(m){
+    let [, mo, da, yr] = m;
+    yr = yr ? (yr.length===2 ? '20'+yr : yr) : String(currentYear);
+    return `${yr}-${mo.padStart(2,'0')}-${da.padStart(2,'0')}`;
+  }
+  m = tok.match(/^([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2})(?:,?\s*(\d{4}))?$/);
+  if(m){
+    const mo = STATEMENT_MONTHS[m[1].toLowerCase()];
+    if(!mo) return null;
+    const yr = m[3] || String(currentYear);
+    return `${yr}-${String(mo).padStart(2,'0')}-${m[2].padStart(2,'0')}`;
+  }
+  return null;
+}
+
+function parseStatementLines(lines){
+  const results = [];
+  lines.forEach(line => {
+    const m = line.match(STATEMENT_LINE_RE);
+    if(!m) return;
+    const date = parseStatementDateToken(m[1].trim());
+    if(!date) return;
+    const rawAmount = m[3];
+    if(m[4] || rawAmount.trim().startsWith('-')) return; // credit/payment/refund, not a purchase
+    const amount = parseFloat(rawAmount.replace(/[$,]/g,''));
+    if(!amount || amount <= 0) return;
+    const description = m[2].trim().replace(/\s{2,}/g,' ');
+    if(description.length < 2) return;
+    results.push({ date, description, amount });
+  });
+  return results;
+}
+
+// A statement transaction counts as "already logged" if there's an existing entry
+// within 3 days (statement post-dates commonly differ from the receipt date) and
+// within 2 cents on amount.
+function matchStatementTransaction(tx){
+  return state.log.find(e => {
+    if(e.bucket === 'Income' || !e.date) return false;
+    const dayDiff = Math.abs((new Date(tx.date) - new Date(e.date)) / 86400000);
+    if(dayDiff > 3) return false;
+    return Math.abs(entryTotal(e) - tx.amount) <= 0.02;
+  });
+}
+
+let statementUnmatched = []; // last-parsed unmatched transactions, indexed for the Add buttons
+
+async function handleStatementFile(file){
+  const statusEl = document.getElementById('statementStatus');
+  const resultsEl = document.getElementById('statementResults');
+  resultsEl.style.display = 'none';
+  statusEl.textContent = 'Reading statement…';
+  try{
+    const lines = await window.extractPdfLines(file);
+    const transactions = parseStatementLines(lines);
+    if(!transactions.length){
+      statusEl.textContent = "Couldn't find transaction lines in this PDF — the statement format may not be one this parser recognizes yet.";
+      return;
+    }
+    const matchedCount = transactions.filter(tx => matchStatementTransaction(tx)).length;
+    statementUnmatched = transactions.filter(tx => !matchStatementTransaction(tx));
+    statusEl.textContent = '';
+    document.getElementById('statementSummary').textContent =
+      `${transactions.length} transactions found — ${matchedCount} already logged, ${statementUnmatched.length} not yet.`;
+    renderStatementUnmatched();
+    resultsEl.style.display = statementUnmatched.length ? '' : 'none';
+    if(!statementUnmatched.length && matchedCount) showToast('Everything on this statement is already logged.');
+  } catch(err){
+    statusEl.textContent = 'Could not read this PDF: ' + err.message;
+  }
+}
+
+function renderStatementUnmatched(){
+  const list = document.getElementById('statementUnmatchedList');
+  list.innerHTML = statementUnmatched.map((tx, i) => `
+    <div class="log-entry" style="cursor:default;">
+      <span class="le-date">${tx.date.slice(5)}</span>
+      <span class="le-note"><strong>${escapeAttr(tx.description)}</strong></span>
+      <span class="le-amt expense">${fmt(tx.amount)}</span>
+      <button class="btn primary" style="padding:4px 10px;font-size:12px;" data-add-tx="${i}">Add</button>
+    </div>`).join('');
+  list.querySelectorAll('[data-add-tx]').forEach(btn =>
+    btn.addEventListener('click', () => addStatementTransaction(parseInt(btn.dataset.addTx, 10))));
+}
+
+function addStatementTransaction(index){
+  const tx = statementUnmatched[index];
+  if(!tx) return;
+  const bucket = guessBucket(tx.description.toLowerCase()) || state.catOrder[0];
+  state.log.push({
+    id: 'l'+Date.now()+Math.random().toString(36).slice(2,7),
+    date: tx.date, bucket, amount: tx.amount, tax: null, taxes: [], tip: null,
+    total: tx.amount, merchant: tx.description, note: 'From statement'
+  });
+  statementUnmatched.splice(index, 1);
+  saveLocal();
+  renderLogList();
+  renderStatementUnmatched();
+  document.getElementById('statementSummary').textContent =
+    document.getElementById('statementSummary').textContent.replace(/\d+ not yet\./, `${statementUnmatched.length} not yet.`);
+  if(!statementUnmatched.length) document.getElementById('statementResults').style.display = 'none';
+  showToast(`Added "${tx.description}".`);
+}
+
+function addAllStatementTransactions(){
+  const count = statementUnmatched.length;
+  while(statementUnmatched.length) addStatementTransaction(0);
+  if(count) showToast(`Added ${count} entries from the statement.`);
+}
+
+document.getElementById('statementInput').addEventListener('change', (e)=>{
+  const file = e.target.files[0];
+  if(file) handleStatementFile(file);
+  e.target.value = '';
+});
+document.getElementById('statementAddAllBtn').addEventListener('click', addAllStatementTransactions);
 
 function renderLogView(){
   const dateEl = document.getElementById('logDate');
