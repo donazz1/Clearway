@@ -470,6 +470,14 @@
             <div id="receiptStatus" style="margin-top:14px;"></div>
           </div>
 
+          <div class="card" id="returnWindowCard" style="display:none;">
+            <h3>⏰ Return windows closing soon</h3>
+            <p style="font-size:12px;color:var(--ink-soft);margin:0 0 12px;line-height:1.5;">
+              General estimates based on typical store policy — always check your actual receipt, since exceptions and per-item rules are common.
+            </p>
+            <div id="returnWindowList"></div>
+          </div>
+
           <div class="card" id="logEntryCard">
             <h3>Log an entry</h3>
             <div id="logPhotoPreview" style="display:none;margin-bottom:14px;">
@@ -1514,6 +1522,64 @@ function last12MonthKeys(){
 }
 function logBucketOptions(){ return ['Income', ...state.catOrder]; }
 
+/* ---------- Return-window reminders ----------
+   General, typical return-policy windows by retailer — approximate on purpose (real
+   policies vary by item, receipt, and province), so these are surfaced as a heads-up
+   to go check the actual receipt, not stated as fact. Checked as case-insensitive
+   substring matches against the entry's merchant name, longest match wins so a more
+   specific name (e.g. "Best Buy Mobile") doesn't lose to a shorter generic one. */
+const RETAILER_RETURN_WINDOWS = {
+  'costco': 90, 'best buy': 15, 'canadian tire': 90, 'home depot': 90, 'rona': 90,
+  'walmart': 90, 'ikea': 365, 'the bay': 30, 'hudson': 30, 'shoppers drug mart': 30,
+  'apple': 14, 'amazon': 30, 'target': 90, 'sport chek': 30, 'winners': 30,
+  'marshalls': 30, 'staples': 14, 'indigo': 14, 'chapters': 14
+};
+function findReturnWindowDays(merchant){
+  if(!merchant) return null;
+  const needle = merchant.toLowerCase();
+  let best = null;
+  for(const [name, days] of Object.entries(RETAILER_RETURN_WINDOWS)){
+    if(needle.includes(name) && (!best || name.length > best.name.length)) best = {name, days};
+  }
+  return best ? best.days : null;
+}
+function addDaysISO(dateStr, days){
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0,10);
+}
+// Surfaces entries whose return window is still open and closing within the next 14
+// days — soonest first. Past-deadline and income entries are excluded; only expenses
+// with a merchant we recognize are eligible at all.
+function getUpcomingReturnDeadlines(){
+  const today = todayISO();
+  return state.log
+    .filter(e => e.bucket !== 'Income' && e.merchant)
+    .map(e => {
+      const days = findReturnWindowDays(e.merchant);
+      if(days == null || !e.date) return null;
+      const deadline = addDaysISO(e.date, days);
+      return { entry: e, deadline, daysLeft: Math.round((new Date(deadline)-new Date(today))/86400000) };
+    })
+    .filter(x => x && x.daysLeft >= 0 && x.daysLeft <= 14)
+    .sort((a,b) => a.daysLeft - b.daysLeft);
+}
+function renderReturnWindows(){
+  const card = document.getElementById('returnWindowCard');
+  const list = document.getElementById('returnWindowList');
+  if(!card || !list) return;
+  const upcoming = getUpcomingReturnDeadlines();
+  if(!upcoming.length){ card.style.display = 'none'; return; }
+  card.style.display = '';
+  list.innerHTML = upcoming.map(({entry, daysLeft}) => `
+    <div class="log-entry" style="cursor:default;">
+      <span class="le-date">${daysLeft===0 ? 'Today' : daysLeft===1 ? '1 day' : daysLeft+' days'}</span>
+      <span class="le-bucket expense">${escapeAttr(entry.bucket)}</span>
+      <span class="le-note"><strong>${escapeAttr(entry.merchant)}</strong></span>
+      <span class="le-amt expense">${fmt(Math.abs(entryTotal(entry)))}</span>
+    </div>`).join('');
+}
+
 function renderLogView(){
   const dateEl = document.getElementById('logDate');
   if(!dateEl.value) dateEl.value = todayISO();
@@ -1592,6 +1658,7 @@ function renderLogList(){
   }
 
   renderMerchantBreakdown(entries);
+  renderReturnWindows();
 }
 
 function renderMerchantBreakdown(entries){
