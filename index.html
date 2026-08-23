@@ -546,6 +546,30 @@
             <h3>By merchant</h3>
             <div id="merchantBreakdown"></div>
           </div>
+
+          <div class="card">
+            <h3>Mileage log</h3>
+            <p style="font-size:13px;color:var(--ink-soft);margin:0 0 14px;line-height:1.5;">
+              Manual entry for now — automatic trip detection needs either a native phone app or a connected vehicle account, neither of which a browser tab can do on its own. Log trips here and export a submittable report for a date range.
+            </p>
+            <div class="log-form">
+              <div class="field-labeled"><label>Date</label><input type="date" id="mileageDate"></div>
+              <div class="field-labeled"><label>Miles</label><input type="text" id="mileageMiles" placeholder="0"></div>
+              <div class="field-labeled" style="grid-column:1 / -1;"><label>Purpose</label><input type="text" id="mileagePurpose" placeholder="e.g. Client visit — downtown office"></div>
+            </div>
+            <div style="margin-top:12px;">
+              <button class="btn primary" onclick="addMileageEntry()">Add trip</button>
+            </div>
+            <div id="mileageList" style="margin-top:14px;"></div>
+            <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
+              <div class="log-form">
+                <div class="field-labeled"><label>Report from</label><input type="date" id="mileageReportFrom"></div>
+                <div class="field-labeled"><label>Report to</label><input type="date" id="mileageReportTo"></div>
+                <div class="field-labeled"><label>Rate per mile (optional)</label><input type="text" id="mileageRate" placeholder="e.g. 0.70"></div>
+              </div>
+              <button class="btn" style="margin-top:12px;" onclick="exportMileageReport()">Export mileage report (PDF)</button>
+            </div>
+          </div>
         </section>
 
         <!-- 12-MONTH VIEW -->
@@ -857,7 +881,8 @@ function blankState(){
     catOrder: DEFAULT_CATEGORIES.slice(),
     settings: { name:'', location:'', occupation:'', household:'', vehicleModel:'', vehicleYear:'', vehicleType:'' },
     log: [],
-    dismissedRecurring: []
+    dismissedRecurring: [],
+    mileage: []
   };
 }
 
@@ -910,7 +935,7 @@ function saveLocal(){
 
 function normalizeState(raw){
   const base = blankState();
-  const merged = Object.assign(base, raw, { expenses: Object.assign(base.expenses, raw.expenses||{}), settings: Object.assign(base.settings, raw.settings||{}), log: Array.isArray(raw.log) ? raw.log : [], dismissedRecurring: Array.isArray(raw.dismissedRecurring) ? raw.dismissedRecurring : [] });
+  const merged = Object.assign(base, raw, { expenses: Object.assign(base.expenses, raw.expenses||{}), settings: Object.assign(base.settings, raw.settings||{}), log: Array.isArray(raw.log) ? raw.log : [], dismissedRecurring: Array.isArray(raw.dismissedRecurring) ? raw.dismissedRecurring : [], mileage: Array.isArray(raw.mileage) ? raw.mileage : [] });
   return merged;
 }
 
@@ -1850,6 +1875,96 @@ document.getElementById('statementInput').addEventListener('change', (e)=>{
 });
 document.getElementById('statementAddAllBtn').addEventListener('click', addAllStatementTransactions);
 
+/* ---------- Mileage log ----------
+   Manual entry only, deliberately — true background trip auto-detection needs either
+   a native phone app (browser tabs can't get "Always" location permission) or a
+   connected-vehicle account (e.g. Tesla's Fleet API), neither of which this static
+   PWA can do on its own. This is the honest v1: log trips by hand, export a
+   submittable report for any date range. */
+function addMileageEntry(){
+  const date = document.getElementById('mileageDate').value || todayISO();
+  const miles = parseFloat(document.getElementById('mileageMiles').value);
+  const purpose = document.getElementById('mileagePurpose').value.trim();
+  if(!miles || miles<=0){ showToast('Enter the number of miles.'); return; }
+  state.mileage.push({ id:'m'+Date.now()+Math.random().toString(36).slice(2,7), date, miles, purpose });
+  saveLocal();
+  document.getElementById('mileageMiles').value = '';
+  document.getElementById('mileagePurpose').value = '';
+  renderMileageList();
+  showToast('Trip logged.');
+}
+
+function deleteMileageEntry(id){
+  state.mileage = state.mileage.filter(m=>m.id!==id);
+  saveLocal();
+  renderMileageList();
+}
+
+function renderMileageList(){
+  const dateEl = document.getElementById('mileageDate');
+  if(dateEl && !dateEl.value) dateEl.value = todayISO();
+  const listEl = document.getElementById('mileageList');
+  if(!listEl) return;
+  const trips = (state.mileage||[]).slice().sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+  if(!trips.length){ listEl.innerHTML = '<div class="log-empty">No trips logged yet.</div>'; return; }
+  const totalMiles = trips.reduce((s,m)=>s+(parseFloat(m.miles)||0),0);
+  listEl.innerHTML = trips.map(m => `
+    <div class="log-entry">
+      <span class="le-date">${(m.date||'').slice(5)}</span>
+      <span class="le-note"><strong>${escapeAttr(m.purpose || 'Trip')}</strong></span>
+      <span class="le-amt expense">${(parseFloat(m.miles)||0).toLocaleString()} mi</span>
+      <button class="le-del" data-id="${m.id}" title="Remove">×</button>
+    </div>`).join('') + `<div style="margin-top:10px;font-size:12px;color:var(--ink-soft);">Total: ${totalMiles.toLocaleString()} mi across ${trips.length} trip${trips.length===1?'':'s'}</div>`;
+  listEl.querySelectorAll('.le-del').forEach(btn=>{
+    btn.addEventListener('click', ()=> deleteMileageEntry(btn.dataset.id));
+  });
+}
+
+function exportMileageReport(){
+  if(!window.jspdf){ showToast('PDF library failed to load.'); return; }
+  const from = document.getElementById('mileageReportFrom').value;
+  const to = document.getElementById('mileageReportTo').value;
+  const rate = parseFloat(document.getElementById('mileageRate').value) || 0;
+  const trips = (state.mileage||[])
+    .filter(m => (!from || m.date >= from) && (!to || m.date <= to))
+    .sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+  if(!trips.length){ showToast('No trips in that date range.'); return; }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({unit:'pt', format:'letter'});
+  doc.setFillColor(...PDF_COLORS.ink); doc.rect(0,0,612,86,'F');
+  doc.setFont('times','bold'); doc.setFontSize(24); doc.setTextColor(...PDF_COLORS.white);
+  doc.text('Clearway', 40, 44);
+  doc.setFont('helvetica','normal'); doc.setFontSize(10);
+  doc.text('Mileage Report', 40, 62);
+  doc.setFontSize(9);
+  const who = state.settings.name ? `Prepared for ${state.settings.name}` : 'Personal mileage report';
+  doc.text(who, 572, 40, {align:'right'});
+  doc.text(todayLong(), 572, 54, {align:'right'});
+
+  const totalMiles = trips.reduce((s,m)=>s+(parseFloat(m.miles)||0),0);
+  const totalAmount = rate ? totalMiles*rate : null;
+
+  doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(...PDF_COLORS.ink);
+  const rangeLabel = `${from || trips[0].date} to ${to || trips[trips.length-1].date}`;
+  doc.text(`Period: ${rangeLabel}`, 40, 110);
+
+  doc.autoTable({
+    startY: 130, margin:{left:40,right:40},
+    head:[['Date','Purpose','Miles'].concat(rate ? ['Amount'] : [])],
+    body: trips.map(m => [m.date, m.purpose||'—', (parseFloat(m.miles)||0).toLocaleString()].concat(rate ? [fmt((parseFloat(m.miles)||0)*rate)] : [])),
+    foot:[['','Total', totalMiles.toLocaleString()].concat(rate ? [fmt(totalAmount)] : [])],
+    theme:'grid',
+    headStyles:{fillColor:PDF_COLORS.ink, textColor:PDF_COLORS.white, fontStyle:'bold', fontSize:9},
+    footStyles:{fillColor:PDF_COLORS.goodSoft, textColor:PDF_COLORS.ink, fontStyle:'bold', fontSize:9},
+    bodyStyles:{fontSize:9, textColor:PDF_COLORS.ink},
+    didParseCell: rightAlignHeaderCols(rate ? [2,3] : [2])
+  });
+
+  doc.save(`Clearway-Mileage-${from||'all'}-to-${to||'now'}.pdf`);
+  showToast('Mileage report downloaded.');
+}
+
 function renderLogView(){
   const dateEl = document.getElementById('logDate');
   if(!dateEl.value) dateEl.value = todayISO();
@@ -1867,6 +1982,7 @@ function renderLogView(){
   filterEl.onchange = renderLogList;
 
   renderLogList();
+  renderMileageList();
 }
 
 function renderLogList(){
