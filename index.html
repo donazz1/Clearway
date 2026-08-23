@@ -208,7 +208,13 @@
   .receipt-raw pre{white-space:pre-wrap;background:var(--paper);border-radius:8px;padding:10px;margin-top:6px;color:var(--ink-soft);max-height:160px;overflow-y:auto;}
 
   .log-month-group{margin-bottom:18px;}
-  .log-month-head{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em;padding:6px 0;border-bottom:1px solid var(--line);margin-bottom:6px;}
+  .log-month-head{
+    display:flex;justify-content:space-between;align-items:baseline;font-size:12px;font-weight:700;
+    color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em;padding:6px 0;
+    border-bottom:1px solid var(--line);margin-bottom:6px;cursor:pointer;list-style:revert;
+  }
+  .log-month-count{font-family:var(--mono);text-transform:none;letter-spacing:0;font-weight:400;opacity:.7;}
+  .log-month-group[open] > .log-month-head{margin-bottom:6px;}
   .log-entry{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px;}
   .log-entry:last-child{border-bottom:none;}
   .log-entry .le-date{width:64px;flex-shrink:0;color:var(--ink-soft);font-family:var(--mono);font-size:11px;}
@@ -1562,7 +1568,11 @@ function renderLogList(){
             <button class="le-del" data-id="${e.id}" title="Remove">×</button>
           </div>`;
       }).join('');
-      return `<div class="log-month-group"><div class="log-month-head">${monthLabel(ym)}</div>${rows}</div>`;
+      const isCurrentMonth = ym === monthKeyOf(todayISO());
+      return `<details class="log-month-group" ${isCurrentMonth ? 'open' : ''}>
+        <summary class="log-month-head">${monthLabel(ym)} <span class="log-month-count">${groups[ym].length}</span></summary>
+        ${rows}
+      </details>`;
     }).join('');
 
     listEl.querySelectorAll('.log-entry').forEach(row=>{
@@ -1888,6 +1898,13 @@ function prepareReceiptForVeryfi(file){
 
 async function handleReceiptFile(file){
   if(!file) return;
+  // Scanning a second receipt overwrites whatever's currently staged in the form — fine
+  // once that first one is saved, but silent data loss if it wasn't. Only warn when
+  // there's actually something unsaved to lose (a staged photo, and not mid-edit of an
+  // already-saved entry, which has its own separate save step).
+  if(pendingReceiptPhoto && !editingEntryId){
+    if(!confirm("You've got an unsaved scan in the form — scanning another receipt will replace it. Save it first with \"Add entry\" if you want to keep it. Continue anyway?")) return;
+  }
   const objectUrl = URL.createObjectURL(file);
   setReceiptStatus(`
     <div class="receipt-preview">
