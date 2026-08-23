@@ -1330,13 +1330,22 @@ function switchView(key){
   if(fab) fab.classList.toggle('hide', key==='log');
 }
 
+// On a phone, tapping + straight into the camera is the point of a quick-add button.
+// On a desktop there's no camera for the file input to prefer — it just opens Finder
+// immediately, which feels like a hijack if you only meant to glance at the log. So
+// only auto-trigger the picker on a device that actually has a camera to jump to.
+function isLikelyMobileDevice(){
+  if(navigator.userAgentData && typeof navigator.userAgentData.mobile === 'boolean') return navigator.userAgentData.mobile;
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
 function openQuickAdd(){
   // Switch to the log view first (synchronously, no delay) so the camera input is actually
   // present and clickable, then trigger it in the same call stack as the tap — iOS Safari
   // requires the camera/file picker to open as a direct result of a user gesture, so this
   // can't be deferred with setTimeout or it'll silently refuse to open.
   switchView('log');
-  document.getElementById('receiptInput').click();
+  if(isLikelyMobileDevice()) document.getElementById('receiptInput').click();
 }
 
 function renderCategoryViews(){
@@ -1943,14 +1952,33 @@ function renderStatementAddedList(){
   const added = state.log.filter(e => e.note === 'From statement');
   if(!added.length){ card.style.display = 'none'; return; }
   card.style.display = '';
+  // Clicking a row opens the same edit form every other entry uses (fix the category,
+  // add tax/tip, whatever) — the checkbox and delete-icon are separate click targets so
+  // tapping them doesn't also trigger the edit.
   list.innerHTML = added.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(e => `
-    <div class="log-entry">
+    <div class="log-entry" data-id="${e.id}" style="cursor:pointer;">
       <input type="checkbox" class="stmt-added-check" data-id="${e.id}" style="flex-shrink:0;">
       <span class="le-date">${(e.date||'').slice(5)}</span>
       <span class="le-bucket expense">${escapeAttr(e.bucket)}</span>
       <span class="le-note"><strong>${escapeAttr(e.merchant||'—')}</strong></span>
       <span class="le-amt expense">${fmt(Math.abs(entryTotal(e)))}</span>
+      <button class="le-del" data-id="${e.id}" title="Remove">×</button>
     </div>`).join('');
+  list.querySelectorAll('.log-entry').forEach(row => {
+    row.addEventListener('click', (ev) => {
+      if(ev.target.closest('.le-del') || ev.target.closest('.stmt-added-check')) return;
+      openEntryForEdit(row.dataset.id);
+    });
+  });
+  list.querySelectorAll('.le-del').forEach(btn => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      state.log = state.log.filter(l => l.id !== btn.dataset.id);
+      if(editingEntryId === btn.dataset.id) cancelEntryEdit();
+      saveLocal();
+      renderLogList();
+    });
+  });
 }
 
 function toggleSelectAllStatementAdded(){
