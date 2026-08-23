@@ -487,6 +487,20 @@
             </div>
           </div>
 
+          <div class="card" id="statementAddedCard" style="display:none;">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+              <h3 style="margin:0;">Added from statements</h3>
+              <div style="display:flex;gap:8px;">
+                <button class="tax-add-btn" id="statementAddedSelectAllBtn" style="color:var(--ink-soft);">Select all</button>
+                <button class="btn" id="statementAddedDeleteBtn" style="padding:6px 12px;font-size:12px;color:var(--bad);">Delete selected</button>
+              </div>
+            </div>
+            <p style="font-size:12px;color:var(--ink-soft);margin:0 0 12px;line-height:1.5;">
+              Everything that's ever been added from a statement upload, in one place — useful for undoing a batch you added before double-checking the category. Nothing here is deleted until you select rows and confirm.
+            </p>
+            <div id="statementAddedList"></div>
+          </div>
+
           <div class="card" id="returnWindowCard" style="display:none;">
             <h3>⏰ Return windows closing soon</h3>
             <p style="font-size:12px;color:var(--ink-soft);margin:0 0 12px;line-height:1.5;">
@@ -1916,6 +1930,48 @@ document.getElementById('statementInput').addEventListener('change', (e)=>{
 });
 document.getElementById('statementAddAllBtn').addEventListener('click', addAllStatementTransactions);
 
+/* ---------- Review/undo entries added from statements ----------
+   The statement-add flow (above) commits entries directly — this is the safety net:
+   every entry ever added that way stays tagged (note === 'From statement'), so a batch
+   added before double-checking categories can be reviewed and removed in bulk, not
+   hunted down one at a time in the full Activity Log. Nothing here deletes without an
+   explicit selection and confirmation — undoing is destructive, unlike adding. */
+function renderStatementAddedList(){
+  const card = document.getElementById('statementAddedCard');
+  const list = document.getElementById('statementAddedList');
+  if(!card || !list) return;
+  const added = state.log.filter(e => e.note === 'From statement');
+  if(!added.length){ card.style.display = 'none'; return; }
+  card.style.display = '';
+  list.innerHTML = added.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(e => `
+    <div class="log-entry">
+      <input type="checkbox" class="stmt-added-check" data-id="${e.id}" style="flex-shrink:0;">
+      <span class="le-date">${(e.date||'').slice(5)}</span>
+      <span class="le-bucket expense">${escapeAttr(e.bucket)}</span>
+      <span class="le-note"><strong>${escapeAttr(e.merchant||'—')}</strong></span>
+      <span class="le-amt expense">${fmt(Math.abs(entryTotal(e)))}</span>
+    </div>`).join('');
+}
+
+function toggleSelectAllStatementAdded(){
+  const boxes = document.querySelectorAll('.stmt-added-check');
+  const allChecked = boxes.length && [...boxes].every(b => b.checked);
+  boxes.forEach(b => b.checked = !allChecked);
+}
+
+function deleteSelectedStatementAdded(){
+  const ids = [...document.querySelectorAll('.stmt-added-check:checked')].map(b => b.dataset.id);
+  if(!ids.length){ showToast('Nothing selected.'); return; }
+  if(!confirm(`Delete ${ids.length} entr${ids.length===1?'y':'ies'} added from statements? This can't be undone.`)) return;
+  state.log = state.log.filter(e => !ids.includes(e.id));
+  saveLocal();
+  renderLogList();
+  showToast(`Deleted ${ids.length} entr${ids.length===1?'y':'ies'}.`);
+}
+
+document.getElementById('statementAddedSelectAllBtn').addEventListener('click', toggleSelectAllStatementAdded);
+document.getElementById('statementAddedDeleteBtn').addEventListener('click', deleteSelectedStatementAdded);
+
 /* ---------- Mileage log ----------
    Manual entry only, deliberately — true background trip auto-detection needs either
    a native phone app (browser tabs can't get "Always" location permission) or a
@@ -2113,6 +2169,7 @@ function renderLogList(){
   renderMerchantBreakdown(entries);
   renderReturnWindows();
   renderRecurringCandidates();
+  renderStatementAddedList();
 }
 
 function renderMerchantBreakdown(entries){
