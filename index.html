@@ -1125,6 +1125,12 @@ function showApp(){
 /* ---------- Formatting ---------- */
 function fmt(n){ const v=Math.round(n||0); const s=v<0?'-':''; return s+'$'+Math.abs(v).toLocaleString(); }
 function monthly(item){ return (parseFloat(item.amount)||0) * (FREQ[item.freq]||1); }
+// What a logged one-time entry actually cost — the stored total (amount + taxes + tip) when
+// present, falling back to the base amount alone for entries saved before this field existed.
+function entryTotal(e){
+  if(e.total!=null && !isNaN(parseFloat(e.total))) return parseFloat(e.total);
+  return parseFloat(e.amount)||0;
+}
 function totalOf(list){ return (list||[]).reduce((s,i)=>s+monthly(i),0); }
 function escapeAttr(s){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 
@@ -1251,7 +1257,7 @@ function renderCategoryLogEntries(sec, cat){
   const entries = state.log.filter(e => e.bucket===cat && monthKeyOf(e.date)===ym)
     .slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
 
-  const total = entries.reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
+  const total = entries.reduce((s,e)=>s+(entryTotal(e)),0);
   totalEl.textContent = entries.length ? `${fmt(total)} · ${entries.length} ${entries.length===1?'entry':'entries'}` : '';
 
   if(entries.length===0){
@@ -1266,7 +1272,7 @@ function renderCategoryLogEntries(sec, cat){
       <div class="log-entry" data-id="${e.id}" style="cursor:pointer;">
         <span class="le-date">${(e.date||'').slice(5)}</span>
         <span class="le-note"><strong>${escapeAttr(primary)}</strong></span>
-        <span class="le-amt expense">-${fmt(Math.abs(parseFloat(e.amount)||0))}</span>
+        <span class="le-amt expense">-${fmt(Math.abs(entryTotal(e)))}</span>
         <button class="le-del" data-id="${e.id}" title="Remove">×</button>
       </div>`;
   }).join('');
@@ -1552,7 +1558,7 @@ function renderLogList(){
             <span class="le-date">${(e.date||'').slice(5)}</span>
             <span class="le-bucket ${isIncome?'income':'expense'}">${escapeAttr(e.bucket)}</span>
             <span class="le-note"><strong>${escapeAttr(primary)}</strong>${secondary}${taxNote}</span>
-            <span class="le-amt ${isIncome?'income':'expense'}">${isIncome?'+':'-'}${fmt(Math.abs(parseFloat(e.amount)||0))}</span>
+            <span class="le-amt ${isIncome?'income':'expense'}">${isIncome?'+':'-'}${fmt(Math.abs(entryTotal(e)))}</span>
             <button class="le-del" data-id="${e.id}" title="Remove">×</button>
           </div>`;
       }).join('');
@@ -1586,7 +1592,7 @@ function renderMerchantBreakdown(entries){
   entries.filter(e => e.merchant && e.merchant.trim()).forEach(e=>{
     const key = e.merchant.trim().toLowerCase();
     if(!byMerchant[key]) byMerchant[key] = { label: e.merchant.trim(), total: 0, count: 0, isIncome: e.bucket==='Income' };
-    byMerchant[key].total += Math.abs(parseFloat(e.amount)||0);
+    byMerchant[key].total += Math.abs(entryTotal(e));
     byMerchant[key].count += 1;
   });
 
@@ -1756,8 +1762,12 @@ function addLogEntry(){
   const merchant = document.getElementById('logMerchant').value.trim();
   const note = document.getElementById('logNote').value;
   if(!amount || amount<=0){ showToast('Enter an amount.'); return; }
+  // What actually got paid — this is the figure that belongs in every spending total,
+  // not the pre-tax `amount` alone. `amount`/`taxes`/`tip` stay stored separately too,
+  // so the breakdown is still there when you reopen the entry to edit it.
+  const total = amount + (tax||0) + (tip||0);
 
-  const fields = { date, bucket, amount, tax, taxes, tip, merchant, note, receiptPhoto: pendingReceiptPhoto };
+  const fields = { date, bucket, amount, tax, taxes, tip, total, merchant, note, receiptPhoto: pendingReceiptPhoto };
   if(editingEntryId){
     const entry = state.log.find(e=>e.id===editingEntryId);
     if(entry) Object.assign(entry, fields);
@@ -1974,8 +1984,8 @@ function renderYearView(){
   const months = last12MonthKeys();
   const rows = months.map(ym=>{
     const entries = state.log.filter(e=>monthKeyOf(e.date)===ym);
-    const loggedIncome = entries.filter(e=>e.bucket==='Income').reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
-    const loggedExpense = entries.filter(e=>e.bucket!=='Income').reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
+    const loggedIncome = entries.filter(e=>e.bucket==='Income').reduce((s,e)=>s+(entryTotal(e)),0);
+    const loggedExpense = entries.filter(e=>e.bucket!=='Income').reduce((s,e)=>s+(entryTotal(e)),0);
     const totalIncome = recurringIncome + loggedIncome;
     const totalExpense = recurringExpenseTotal + loggedExpense;
     const net = totalIncome - totalExpense;
@@ -2359,7 +2369,7 @@ function buildSummaryDoc(detailed){
     Object.keys(groups).sort().forEach(ym=>{
       if(y > 680){ y = pdfNewPage(doc); }
       const entries = groups[ym];
-      const monthTotal = entries.reduce((s,e)=> s + (e.bucket==='Income' ? (parseFloat(e.amount)||0) : -(parseFloat(e.amount)||0)), 0);
+      const monthTotal = entries.reduce((s,e)=> s + (e.bucket==='Income' ? (entryTotal(e)) : -(entryTotal(e))), 0);
       doc.setFont('times','bold'); doc.setFontSize(11); doc.setTextColor(...PDF_COLORS.ink);
       doc.text(monthLabel(ym), 40, y); y += 8;
       doc.autoTable({
@@ -2369,7 +2379,7 @@ function buildSummaryDoc(detailed){
           (e.date||'').slice(5),
           e.bucket||'—',
           e.merchant || e.note || '—',
-          (e.bucket==='Income'?'+':'-') + fmt(Math.abs(parseFloat(e.amount)||0))
+          (e.bucket==='Income'?'+':'-') + fmt(Math.abs(entryTotal(e)))
         ]),
         foot:[['','','Month total', fmtAcct(monthTotal)]],
         theme:'grid',
