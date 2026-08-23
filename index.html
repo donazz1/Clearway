@@ -478,6 +478,14 @@
             <div id="returnWindowList"></div>
           </div>
 
+          <div class="card" id="recurringCard" style="display:none;">
+            <h3>🔁 Looks recurring</h3>
+            <p style="font-size:12px;color:var(--ink-soft);margin:0 0 12px;line-height:1.5;">
+              These merchants keep showing up with a similar amount — want to track them as a recurring expense instead of logging each one by hand?
+            </p>
+            <div id="recurringList"></div>
+          </div>
+
           <div class="card" id="logEntryCard">
             <h3>Log an entry</h3>
             <div id="logPhotoPreview" style="display:none;margin-bottom:14px;">
@@ -800,7 +808,8 @@ function blankState(){
     notes: '',
     catOrder: DEFAULT_CATEGORIES.slice(),
     settings: { name:'', location:'', occupation:'', household:'', vehicleModel:'', vehicleYear:'', vehicleType:'' },
-    log: []
+    log: [],
+    dismissedRecurring: []
   };
 }
 
@@ -853,7 +862,7 @@ function saveLocal(){
 
 function normalizeState(raw){
   const base = blankState();
-  const merged = Object.assign(base, raw, { expenses: Object.assign(base.expenses, raw.expenses||{}), settings: Object.assign(base.settings, raw.settings||{}), log: Array.isArray(raw.log) ? raw.log : [] });
+  const merged = Object.assign(base, raw, { expenses: Object.assign(base.expenses, raw.expenses||{}), settings: Object.assign(base.settings, raw.settings||{}), log: Array.isArray(raw.log) ? raw.log : [], dismissedRecurring: Array.isArray(raw.dismissedRecurring) ? raw.dismissedRecurring : [] });
   return merged;
 }
 
@@ -1580,6 +1589,88 @@ function renderReturnWindows(){
     </div>`).join('');
 }
 
+/* ---------- Recurring/subscription detection ----------
+   Looks at real logged/scanned entries for a merchant that keeps showing up with a
+   similar amount across several different months — a strong signal it's an actual
+   recurring charge (subscription, membership, bill), not a one-off. Purely a
+   suggestion: nothing is added to the recurring-estimate system (state.expenses)
+   until the user taps "Mark as recurring" — this only ever reads state.log. */
+function normalizedMerchantKey(name){ return (name||'').trim().toLowerCase(); }
+
+function isAlreadyTrackedRecurring(merchantKey){
+  return state.catOrder.some(cat =>
+    (state.expenses[cat]||[]).some(item => normalizedMerchantKey(item.name) === merchantKey)
+  );
+}
+
+function detectRecurringCandidates(){
+  const dismissed = new Set(state.dismissedRecurring || []);
+  const groups = {};
+  state.log.filter(e => e.bucket !== 'Income' && e.merchant && e.merchant.trim()).forEach(e => {
+    const key = normalizedMerchantKey(e.merchant);
+    (groups[key] = groups[key] || []).push(e);
+  });
+
+  const candidates = [];
+  Object.entries(groups).forEach(([key, entries]) => {
+    if(dismissed.has(key) || isAlreadyTrackedRecurring(key)) return;
+    const months = new Set(entries.map(e => monthKeyOf(e.date)));
+    if(months.size < 3) return; // needs to show up in at least 3 different months to count as a pattern
+
+    const amounts = entries.map(e => Math.abs(entryTotal(e)));
+    const avg = amounts.reduce((s,a)=>s+a,0) / amounts.length;
+    const spread = Math.max(...amounts) - Math.min(...amounts);
+    if(avg <= 0 || spread / avg > 0.25) return; // amounts too inconsistent to call this "recurring"
+
+    // Most common bucket among this merchant's entries, in case it varies slightly
+    const bucketCounts = {};
+    entries.forEach(e => { bucketCounts[e.bucket] = (bucketCounts[e.bucket]||0) + 1; });
+    const bucket = Object.entries(bucketCounts).sort((a,b)=>b[1]-a[1])[0][0];
+
+    candidates.push({ key, merchant: entries[0].merchant.trim(), bucket, avgAmount: avg, months: months.size });
+  });
+
+  return candidates.sort((a,b) => b.months - a.months);
+}
+
+function markMerchantRecurring(key){
+  const candidate = detectRecurringCandidates().find(c => c.key === key);
+  if(!candidate) return;
+  if(!state.expenses[candidate.bucket]) state.expenses[candidate.bucket] = [];
+  state.expenses[candidate.bucket].push({ name: candidate.merchant, amount: String(Math.round(candidate.avgAmount)), freq: 'monthly' });
+  saveLocal();
+  showToast(`Added "${candidate.merchant}" as a recurring expense.`);
+  renderRecurringCandidates();
+  if(currentView === 'overview') refreshUI();
+}
+
+function dismissRecurringCandidate(key){
+  if(!state.dismissedRecurring) state.dismissedRecurring = [];
+  if(!state.dismissedRecurring.includes(key)) state.dismissedRecurring.push(key);
+  saveLocal();
+  renderRecurringCandidates();
+}
+
+function renderRecurringCandidates(){
+  const card = document.getElementById('recurringCard');
+  const list = document.getElementById('recurringList');
+  if(!card || !list) return;
+  const candidates = detectRecurringCandidates();
+  if(!candidates.length){ card.style.display = 'none'; return; }
+  card.style.display = '';
+  list.innerHTML = candidates.map(c => `
+    <div class="log-entry" style="cursor:default;">
+      <span class="le-date">${c.months}mo</span>
+      <span class="le-bucket expense">${escapeAttr(c.bucket)}</span>
+      <span class="le-note"><strong>${escapeAttr(c.merchant)}</strong></span>
+      <span class="le-amt expense">${fmt(c.avgAmount)}</span>
+      <button class="btn primary" style="padding:4px 10px;font-size:12px;" data-mark="${escapeAttr(c.key)}">Mark recurring</button>
+      <button class="tax-add-btn" style="color:var(--ink-soft);" data-dismiss="${escapeAttr(c.key)}">Dismiss</button>
+    </div>`).join('');
+  list.querySelectorAll('[data-mark]').forEach(btn => btn.addEventListener('click', () => markMerchantRecurring(btn.dataset.mark)));
+  list.querySelectorAll('[data-dismiss]').forEach(btn => btn.addEventListener('click', () => dismissRecurringCandidate(btn.dataset.dismiss)));
+}
+
 function renderLogView(){
   const dateEl = document.getElementById('logDate');
   if(!dateEl.value) dateEl.value = todayISO();
@@ -1659,6 +1750,7 @@ function renderLogList(){
 
   renderMerchantBreakdown(entries);
   renderReturnWindows();
+  renderRecurringCandidates();
 }
 
 function renderMerchantBreakdown(entries){
