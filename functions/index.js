@@ -47,11 +47,11 @@ exports.scanReceipt = onCall(
 
     const ocrText = data.ocr_text || '';
 
-    // Confirmed against a real receipt: Veryfi's own structured `total` can be wrong on
-    // receipts where subtotal/tax/total are laid out unusually (it returned the subtotal
-    // as the total). The OCR text itself still usually has the real final charge on a
-    // "total paid" / "amount paid" line — prefer that when it's there.
-    function extractAmountFromText(text) {
+    // The receipt's real, final charge — used only to derive tax below when Veryfi's own
+    // tax_lines come back empty. The OCR text usually has this on a "total paid" line even
+    // when data.total itself is unreliable (confirmed on a real receipt where data.total
+    // actually held the subtotal, not the total).
+    function extractTotalFromText(text) {
       const patterns = [
         /total\s*paid[:\s]*\$?\s*([\d,]+\.\d{2})/i,
         /amount\s*paid[:\s]*\$?\s*([\d,]+\.\d{2})/i,
@@ -63,22 +63,29 @@ exports.scanReceipt = onCall(
       }
       return null;
     }
-    const structuredAmount = typeof data.total === 'number' ? data.total : null;
-    const amount = extractAmountFromText(ocrText) ?? structuredAmount;
+    const subtotal = typeof data.subtotal === 'number' ? data.subtotal : null;
+    const receiptTotal = extractTotalFromText(ocrText) ?? (typeof data.total === 'number' ? data.total : null);
 
-    // Tax: prefer Veryfi's own structured tax lines. When those come back empty (it
-    // happens — confirmed on a real receipt where the tax lines were unparsed even
-    // though the total and subtotal were both present), the difference between the
-    // amount above and the subtotal is the real tax, even when Veryfi couldn't isolate
-    // the individual line itself.
+    // Clearway's "amount" is the PRE-TAX base — tax and tip get added back on top
+    // client-side into the displayed Total, so this must never be the receipt's
+    // tax-inclusive grand total (confirmed on a real receipt: using the grand total here
+    // double-counted the tax once the client added it again — 22.59 + 2.60 = 25.19
+    // instead of the real 22.59). Subtotal is the correct field; only fall back to
+    // whatever total figure exists if Veryfi genuinely didn't extract a subtotal at all.
+    const amount = subtotal ?? receiptTotal;
+
+    // Tax: prefer Veryfi's own structured tax lines (can be more than one — HST + a
+    // second provincial line, both confirmed coming through correctly on a real receipt).
+    // When those come back empty, the gap between the real total and the subtotal is the
+    // tax, even when Veryfi couldn't isolate the individual line itself.
     let taxes = Array.isArray(data.tax_lines) && data.tax_lines.length
       ? data.tax_lines.map(t => ({ label: t.name || t.code || 'Tax', amount: Number(t.total ?? t.amount ?? 0) }))
       : [];
     if (!taxes.length && typeof data.tax === 'number' && data.tax > 0) {
       taxes = [{ label: 'Tax', amount: data.tax }];
     }
-    if (!taxes.length && typeof data.subtotal === 'number' && typeof amount === 'number') {
-      const implied = Math.round((amount - data.subtotal) * 100) / 100;
+    if (!taxes.length && subtotal != null && receiptTotal != null) {
+      const implied = Math.round((receiptTotal - subtotal) * 100) / 100;
       if (implied > 0.01) taxes = [{ label: 'Tax', amount: implied }];
     }
 
