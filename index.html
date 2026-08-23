@@ -473,18 +473,21 @@
           <div class="card">
             <h3>Reconcile a statement</h3>
             <p style="font-size:13px;color:var(--ink-soft);margin:0 0 14px;line-height:1.5;">
-              Upload a bank or credit-card statement PDF and Clearway checks it against what you've already logged — anything missing shows up as a quick add-it list. Runs entirely in your browser; the PDF is never uploaded anywhere. Extraction is best-effort — statement formats vary, so double-check the results below before adding anything.
+              Upload a bank or credit-card statement PDF and Clearway checks it against what you've already logged — anything missing shows up as a quick add-it list. Runs entirely in your browser; the PDF is never uploaded anywhere. Extraction is best-effort — statement formats vary, so double-check the results below before adding anything. Your progress here is saved, so it stays put if you step away mid-review — archive a statement once you're done with it.
             </p>
             <input type="file" accept="application/pdf" id="statementInput" style="display:none;">
             <button class="btn primary" onclick="document.getElementById('statementInput').click()">📄 Upload statement</button>
             <div id="statementStatus" style="margin-top:14px;"></div>
-            <div id="statementResults" style="display:none;margin-top:14px;">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-                <strong style="font-size:13px;" id="statementSummary"></strong>
-                <button class="btn" id="statementAddAllBtn" style="padding:6px 12px;font-size:12px;">Add checked</button>
-              </div>
-              <div id="statementUnmatchedList"></div>
-            </div>
+          </div>
+
+          <div id="activeStatementsContainer"></div>
+
+          <div class="card" id="archivedStatementsCard" style="display:none;">
+            <h3>Archived statements</h3>
+            <p style="font-size:12px;color:var(--ink-soft);margin:0 0 12px;line-height:1.5;">
+              Statements you've finished reconciling. Unarchive one if you need to go back and fix something.
+            </p>
+            <div id="archivedStatementsList"></div>
           </div>
 
           <div class="card" id="statementAddedCard" style="display:none;">
@@ -905,7 +908,8 @@ function blankState(){
     settings: { name:'', location:'', occupation:'', household:'', vehicleModel:'', vehicleYear:'', vehicleType:'', mileageUnit:'km' },
     log: [],
     dismissedRecurring: [],
-    mileage: []
+    mileage: [],
+    statements: []
   };
 }
 
@@ -958,7 +962,7 @@ function saveLocal(){
 
 function normalizeState(raw){
   const base = blankState();
-  const merged = Object.assign(base, raw, { expenses: Object.assign(base.expenses, raw.expenses||{}), settings: Object.assign(base.settings, raw.settings||{}), log: Array.isArray(raw.log) ? raw.log : [], dismissedRecurring: Array.isArray(raw.dismissedRecurring) ? raw.dismissedRecurring : [], mileage: Array.isArray(raw.mileage) ? raw.mileage : [] });
+  const merged = Object.assign(base, raw, { expenses: Object.assign(base.expenses, raw.expenses||{}), settings: Object.assign(base.settings, raw.settings||{}), log: Array.isArray(raw.log) ? raw.log : [], dismissedRecurring: Array.isArray(raw.dismissedRecurring) ? raw.dismissedRecurring : [], mileage: Array.isArray(raw.mileage) ? raw.mileage : [], statements: Array.isArray(raw.statements) ? raw.statements : [] });
   return merged;
 }
 
@@ -1835,101 +1839,184 @@ function matchStatementTransaction(tx){
   });
 }
 
-let statementUnmatched = []; // last-parsed unmatched transactions, indexed for the Add buttons
-
+// Statements are persisted state, not an in-memory variable — losing your place mid
+// -review (a reload, a tab close, a remote sync) was a real reported bug. Each upload
+// becomes a state.statements[] entry with its own transactions, each tracked as
+// pending/added/skipped, so review progress survives exactly like everything else.
 async function handleStatementFile(file){
   const statusEl = document.getElementById('statementStatus');
-  const resultsEl = document.getElementById('statementResults');
-  resultsEl.style.display = 'none';
   statusEl.textContent = 'Reading statement…';
   try{
     const lines = await window.extractPdfLines(file);
-    const transactions = parseStatementLines(lines);
-    if(!transactions.length){
+    const parsed = parseStatementLines(lines);
+    if(!parsed.length){
       statusEl.textContent = "Couldn't find transaction lines in this PDF — the statement format may not be one this parser recognizes yet.";
       return;
     }
-    const matchedCount = transactions.filter(tx => matchStatementTransaction(tx)).length;
-    statementUnmatched = transactions.filter(tx => !matchStatementTransaction(tx));
+    const matchedCount = parsed.filter(tx => matchStatementTransaction(tx)).length;
+    const unmatched = parsed.filter(tx => !matchStatementTransaction(tx));
     statusEl.textContent = '';
-    document.getElementById('statementSummary').textContent =
-      `${transactions.length} transactions found — ${matchedCount} already logged, ${statementUnmatched.length} not yet.`;
-    renderStatementUnmatched();
-    resultsEl.style.display = statementUnmatched.length ? '' : 'none';
-    if(!statementUnmatched.length && matchedCount) showToast('Everything on this statement is already logged.');
+    if(!unmatched.length){
+      showToast(matchedCount ? 'Everything on this statement is already logged.' : 'No new transactions found.');
+      return;
+    }
+    state.statements.push({
+      id: 'st'+Date.now()+Math.random().toString(36).slice(2,7),
+      filename: file.name, uploadedDate: todayISO(), archived: false, matchedCount,
+      transactions: unmatched.map(tx => ({
+        id: 'stx'+Date.now()+Math.random().toString(36).slice(2,7),
+        date: tx.date, description: tx.description, amount: tx.amount,
+        guessedBucket: guessBucket(tx.description.toLowerCase()) || state.catOrder[0],
+        status: 'pending', loggedEntryId: null
+      }))
+    });
+    saveLocal();
+    renderActiveStatements();
   } catch(err){
     statusEl.textContent = 'Could not read this PDF: ' + err.message;
   }
 }
 
+function statementSummaryLine(stmt){
+  const added = stmt.transactions.filter(t=>t.status==='added').length;
+  const skipped = stmt.transactions.filter(t=>t.status==='skipped').length;
+  const pending = stmt.transactions.filter(t=>t.status==='pending').length;
+  return `${stmt.transactions.length + stmt.matchedCount} transactions found — ${stmt.matchedCount} already logged, ${added} added, ${skipped} skipped, ${pending} left to review.`;
+}
+
 // The guessed category is shown and editable right in the row, never applied silently
 // — this is the same "you check it before it saves" principle the receipt scanner
 // already follows. Nothing commits to state.log until the user acts on a row.
-function renderStatementUnmatched(){
-  const list = document.getElementById('statementUnmatchedList');
-  list.innerHTML = statementUnmatched.map((tx, i) => {
-    if(!tx.guessedBucket) tx.guessedBucket = guessBucket(tx.description.toLowerCase()) || state.catOrder[0];
-    const options = state.catOrder.map(c =>
-      `<option value="${escapeAttr(c)}" ${c===tx.guessedBucket?'selected':''}>${escapeAttr(c)}</option>`).join('');
+function renderActiveStatements(){
+  const container = document.getElementById('activeStatementsContainer');
+  if(!container) return;
+  const active = state.statements.filter(s => !s.archived);
+  container.innerHTML = active.map(stmt => {
+    const pending = stmt.transactions.filter(t => t.status === 'pending');
+    const rows = pending.map(tx => {
+      const options = state.catOrder.map(c =>
+        `<option value="${escapeAttr(c)}" ${c===tx.guessedBucket?'selected':''}>${escapeAttr(c)}</option>`).join('');
+      return `
+      <div class="log-entry" style="cursor:default;">
+        <input type="checkbox" class="stmt-check" data-stmt="${stmt.id}" data-tx="${tx.id}" checked style="flex-shrink:0;">
+        <span class="le-date">${tx.date.slice(5)}</span>
+        <span class="le-note"><strong>${escapeAttr(tx.description)}</strong></span>
+        <select class="stmt-bucket" data-stmt="${stmt.id}" data-tx="${tx.id}" style="padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--paper);font-size:12px;flex-shrink:0;">${options}</select>
+        <span class="le-amt expense">${fmt(tx.amount)}</span>
+        <button class="btn primary" style="padding:4px 10px;font-size:12px;flex-shrink:0;" data-add="${stmt.id}|${tx.id}">Add</button>
+        <button class="tax-add-btn" style="color:var(--ink-soft);flex-shrink:0;" data-skip="${stmt.id}|${tx.id}">Skip</button>
+      </div>`;
+    }).join('') || '<div class="log-empty">Nothing left to review on this one.</div>';
     return `
-    <div class="log-entry" style="cursor:default;">
-      <input type="checkbox" class="stmt-check" data-idx="${i}" checked style="flex-shrink:0;">
-      <span class="le-date">${tx.date.slice(5)}</span>
-      <span class="le-note"><strong>${escapeAttr(tx.description)}</strong></span>
-      <select class="stmt-bucket" data-idx="${i}" style="padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--paper);font-size:12px;flex-shrink:0;">${options}</select>
-      <span class="le-amt expense">${fmt(tx.amount)}</span>
-      <button class="btn primary" style="padding:4px 10px;font-size:12px;flex-shrink:0;" data-add-tx="${i}">Add</button>
+    <div class="card" data-statement-card="${stmt.id}">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:4px;">
+        <h3 style="margin:0;">${escapeAttr(stmt.filename)}</h3>
+        <div style="display:flex;gap:8px;">
+          <button class="btn" style="padding:6px 12px;font-size:12px;" data-add-checked="${stmt.id}">Add checked</button>
+          <button class="btn" style="padding:6px 12px;font-size:12px;" data-archive="${stmt.id}">Archive statement</button>
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">${statementSummaryLine(stmt)}</div>
+      ${rows}
     </div>`;
   }).join('');
-  list.querySelectorAll('[data-add-tx]').forEach(btn =>
-    btn.addEventListener('click', () => addStatementTransaction(parseInt(btn.dataset.addTx, 10))));
+
+  container.querySelectorAll('[data-add]').forEach(btn => btn.addEventListener('click', () => {
+    const [stmtId, txId] = btn.dataset.add.split('|');
+    resolveStatementTransaction(stmtId, txId, 'added');
+  }));
+  container.querySelectorAll('[data-skip]').forEach(btn => btn.addEventListener('click', () => {
+    const [stmtId, txId] = btn.dataset.skip.split('|');
+    resolveStatementTransaction(stmtId, txId, 'skipped');
+  }));
+  container.querySelectorAll('[data-add-checked]').forEach(btn =>
+    btn.addEventListener('click', () => addCheckedStatementTransactions(btn.dataset.addChecked)));
+  container.querySelectorAll('[data-archive]').forEach(btn =>
+    btn.addEventListener('click', () => archiveStatement(btn.dataset.archive)));
+
+  renderArchivedStatements();
 }
 
-function updateStatementSummaryCount(){
-  const el = document.getElementById('statementSummary');
-  if(el) el.textContent = el.textContent.replace(/\d+ not yet\./, `${statementUnmatched.length} not yet.`);
-  if(!statementUnmatched.length) document.getElementById('statementResults').style.display = 'none';
+function renderArchivedStatements(){
+  const card = document.getElementById('archivedStatementsCard');
+  const list = document.getElementById('archivedStatementsList');
+  if(!card || !list) return;
+  const archived = state.statements.filter(s => s.archived);
+  if(!archived.length){ card.style.display = 'none'; return; }
+  card.style.display = '';
+  list.innerHTML = archived.map(stmt => `
+    <div class="log-entry" style="cursor:default;">
+      <span class="le-date">${stmt.uploadedDate.slice(5)}</span>
+      <span class="le-note"><strong>${escapeAttr(stmt.filename)}</strong></span>
+      <button class="btn" style="padding:4px 10px;font-size:12px;flex-shrink:0;" data-unarchive="${stmt.id}">Unarchive</button>
+    </div>`).join('');
+  list.querySelectorAll('[data-unarchive]').forEach(btn =>
+    btn.addEventListener('click', () => unarchiveStatement(btn.dataset.unarchive)));
 }
 
-function pushStatementEntry(tx, bucket){
-  state.log.push({
-    id: 'l'+Date.now()+Math.random().toString(36).slice(2,7),
-    date: tx.date, bucket, amount: tx.amount, tax: null, taxes: [], tip: null,
-    total: tx.amount, merchant: tx.description, note: 'From statement'
-  });
-}
-
-function addStatementTransaction(index){
-  const tx = statementUnmatched[index];
-  if(!tx) return;
-  const selectEl = document.querySelector(`.stmt-bucket[data-idx="${index}"]`);
-  const bucket = (selectEl && selectEl.value) || tx.guessedBucket || state.catOrder[0];
-  pushStatementEntry(tx, bucket);
-  statementUnmatched.splice(index, 1);
+function resolveStatementTransaction(stmtId, txId, outcome){
+  const stmt = state.statements.find(s => s.id === stmtId);
+  if(!stmt) return;
+  const tx = stmt.transactions.find(t => t.id === txId);
+  if(!tx || tx.status !== 'pending') return;
+  if(outcome === 'added'){
+    const selectEl = document.querySelector(`.stmt-bucket[data-stmt="${stmtId}"][data-tx="${txId}"]`);
+    const bucket = (selectEl && selectEl.value) || tx.guessedBucket || state.catOrder[0];
+    const entry = { id: 'l'+Date.now()+Math.random().toString(36).slice(2,7),
+      date: tx.date, bucket, amount: tx.amount, tax: null, taxes: [], tip: null,
+      total: tx.amount, merchant: tx.description, note: 'From statement' };
+    state.log.push(entry);
+    tx.loggedEntryId = entry.id;
+    tx.status = 'added';
+  } else {
+    tx.status = 'skipped';
+  }
   saveLocal();
   renderLogList();
-  renderStatementUnmatched();
-  updateStatementSummaryCount();
-  showToast(`Added "${tx.description}".`);
+  renderActiveStatements();
+  showToast(outcome === 'added' ? `Added "${tx.description}".` : `Skipped "${tx.description}".`);
 }
 
-function addAllStatementTransactions(){
-  const checkedIdx = [...document.querySelectorAll('.stmt-check:checked')].map(el => parseInt(el.dataset.idx, 10));
-  if(!checkedIdx.length){ showToast('Nothing checked to add.'); return; }
-  // Resolve each row's tx + chosen bucket by reference before mutating the array —
-  // indexes shift once entries start being removed, object identity doesn't.
-  const toAdd = checkedIdx.map(i => {
-    const tx = statementUnmatched[i];
-    const selectEl = document.querySelector(`.stmt-bucket[data-idx="${i}"]`);
-    return { tx, bucket: (selectEl && selectEl.value) || tx.guessedBucket || state.catOrder[0] };
+function addCheckedStatementTransactions(stmtId){
+  const stmt = state.statements.find(s => s.id === stmtId);
+  if(!stmt) return;
+  const checked = [...document.querySelectorAll(`.stmt-check[data-stmt="${stmtId}"]:checked`)].map(el => el.dataset.tx);
+  if(!checked.length){ showToast('Nothing checked to add.'); return; }
+  let count = 0;
+  checked.forEach(txId => {
+    const tx = stmt.transactions.find(t => t.id === txId);
+    if(!tx || tx.status !== 'pending') return;
+    const selectEl = document.querySelector(`.stmt-bucket[data-stmt="${stmtId}"][data-tx="${txId}"]`);
+    const bucket = (selectEl && selectEl.value) || tx.guessedBucket || state.catOrder[0];
+    const entry = { id: 'l'+Date.now()+Math.random().toString(36).slice(2,7)+count,
+      date: tx.date, bucket, amount: tx.amount, tax: null, taxes: [], tip: null,
+      total: tx.amount, merchant: tx.description, note: 'From statement' };
+    state.log.push(entry);
+    tx.loggedEntryId = entry.id;
+    tx.status = 'added';
+    count++;
   });
-  toAdd.forEach(({tx, bucket}) => pushStatementEntry(tx, bucket));
-  statementUnmatched = statementUnmatched.filter(tx => !toAdd.some(t => t.tx === tx));
   saveLocal();
   renderLogList();
-  renderStatementUnmatched();
-  updateStatementSummaryCount();
-  showToast(`Added ${toAdd.length} entr${toAdd.length===1?'y':'ies'} from the statement.`);
+  renderActiveStatements();
+  showToast(`Added ${count} entr${count===1?'y':'ies'} from the statement.`);
+}
+
+function archiveStatement(stmtId){
+  const stmt = state.statements.find(s => s.id === stmtId);
+  if(!stmt) return;
+  stmt.archived = true;
+  saveLocal();
+  renderActiveStatements();
+  showToast(`Archived "${stmt.filename}".`);
+}
+
+function unarchiveStatement(stmtId){
+  const stmt = state.statements.find(s => s.id === stmtId);
+  if(!stmt) return;
+  stmt.archived = false;
+  saveLocal();
+  renderActiveStatements();
 }
 
 document.getElementById('statementInput').addEventListener('change', (e)=>{
@@ -1937,7 +2024,6 @@ document.getElementById('statementInput').addEventListener('change', (e)=>{
   if(file) handleStatementFile(file);
   e.target.value = '';
 });
-document.getElementById('statementAddAllBtn').addEventListener('click', addAllStatementTransactions);
 
 /* ---------- Review/undo entries added from statements ----------
    The statement-add flow (above) commits entries directly — this is the safety net:
@@ -2198,6 +2284,7 @@ function renderLogList(){
   renderReturnWindows();
   renderRecurringCandidates();
   renderStatementAddedList();
+  renderActiveStatements();
 }
 
 function renderMerchantBreakdown(entries){
