@@ -548,13 +548,22 @@
           </div>
 
           <div class="card">
-            <h3>Mileage log</h3>
-            <p style="font-size:13px;color:var(--ink-soft);margin:0 0 14px;line-height:1.5;">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+              <h3 style="margin:0;">Mileage log</h3>
+              <div class="field-labeled" style="margin:0;">
+                <label style="font-size:11px;">Units</label>
+                <select id="mileageUnit" style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--paper);font-size:12px;" onchange="setMileageUnit(this.value)">
+                  <option value="km">Kilometers</option>
+                  <option value="mi">Miles</option>
+                </select>
+              </div>
+            </div>
+            <p style="font-size:13px;color:var(--ink-soft);margin:8px 0 14px;line-height:1.5;">
               Manual entry for now — automatic trip detection needs either a native phone app or a connected vehicle account, neither of which a browser tab can do on its own. Log trips here and export a submittable report for a date range.
             </p>
             <div class="log-form">
               <div class="field-labeled"><label>Date</label><input type="date" id="mileageDate"></div>
-              <div class="field-labeled"><label>Miles</label><input type="text" id="mileageMiles" placeholder="0"></div>
+              <div class="field-labeled"><label id="mileageMilesLabel">Kilometers</label><input type="text" id="mileageMiles" placeholder="0"></div>
               <div class="field-labeled" style="grid-column:1 / -1;"><label>Purpose</label><input type="text" id="mileagePurpose" placeholder="e.g. Client visit — downtown office"></div>
             </div>
             <div style="margin-top:12px;">
@@ -565,7 +574,7 @@
               <div class="log-form">
                 <div class="field-labeled"><label>Report from</label><input type="date" id="mileageReportFrom"></div>
                 <div class="field-labeled"><label>Report to</label><input type="date" id="mileageReportTo"></div>
-                <div class="field-labeled"><label>Rate per mile (optional)</label><input type="text" id="mileageRate" placeholder="e.g. 0.70"></div>
+                <div class="field-labeled"><label id="mileageRateLabel">Rate per km (optional)</label><input type="text" id="mileageRate" placeholder="e.g. 0.70"></div>
               </div>
               <button class="btn" style="margin-top:12px;" onclick="exportMileageReport()">Export mileage report (PDF)</button>
             </div>
@@ -879,7 +888,7 @@ function blankState(){
     expenses: DEFAULT_CATEGORIES.reduce((o,c)=>{o[c]=[];return o;},{}),
     notes: '',
     catOrder: DEFAULT_CATEGORIES.slice(),
-    settings: { name:'', location:'', occupation:'', household:'', vehicleModel:'', vehicleYear:'', vehicleType:'' },
+    settings: { name:'', location:'', occupation:'', household:'', vehicleModel:'', vehicleYear:'', vehicleType:'', mileageUnit:'km' },
     log: [],
     dismissedRecurring: [],
     mileage: []
@@ -1881,11 +1890,34 @@ document.getElementById('statementAddAllBtn').addEventListener('click', addAllSt
    connected-vehicle account (e.g. Tesla's Fleet API), neither of which this static
    PWA can do on its own. This is the honest v1: log trips by hand, export a
    submittable report for any date range. */
+// Unit is a display/label setting, not a per-entry conversion — the stored number is
+// whatever was typed under whichever unit was active at the time. That's the honest
+// scope of "a way to set it": switching this changes the label going forward, it
+// doesn't retroactively convert numbers already logged under the other unit.
+function mileageUnitLabel(){ return (state.settings.mileageUnit === 'mi') ? 'mi' : 'km'; }
+function mileageUnitWord(){ return (state.settings.mileageUnit === 'mi') ? 'Miles' : 'Kilometers'; }
+
+function setMileageUnit(unit){
+  state.settings.mileageUnit = (unit === 'mi') ? 'mi' : 'km';
+  saveLocal();
+  refreshMileageUnitLabels();
+  renderMileageList();
+}
+
+function refreshMileageUnitLabels(){
+  const unitSel = document.getElementById('mileageUnit');
+  if(unitSel) unitSel.value = state.settings.mileageUnit || 'km';
+  const milesLabel = document.getElementById('mileageMilesLabel');
+  if(milesLabel) milesLabel.textContent = mileageUnitWord();
+  const rateLabel = document.getElementById('mileageRateLabel');
+  if(rateLabel) rateLabel.textContent = `Rate per ${mileageUnitLabel()} (optional)`;
+}
+
 function addMileageEntry(){
   const date = document.getElementById('mileageDate').value || todayISO();
   const miles = parseFloat(document.getElementById('mileageMiles').value);
   const purpose = document.getElementById('mileagePurpose').value.trim();
-  if(!miles || miles<=0){ showToast('Enter the number of miles.'); return; }
+  if(!miles || miles<=0){ showToast(`Enter the number of ${mileageUnitLabel()}.`); return; }
   state.mileage.push({ id:'m'+Date.now()+Math.random().toString(36).slice(2,7), date, miles, purpose });
   saveLocal();
   document.getElementById('mileageMiles').value = '';
@@ -1901,10 +1933,12 @@ function deleteMileageEntry(id){
 }
 
 function renderMileageList(){
+  refreshMileageUnitLabels();
   const dateEl = document.getElementById('mileageDate');
   if(dateEl && !dateEl.value) dateEl.value = todayISO();
   const listEl = document.getElementById('mileageList');
   if(!listEl) return;
+  const unit = mileageUnitLabel();
   const trips = (state.mileage||[]).slice().sort((a,b)=> (b.date||'').localeCompare(a.date||''));
   if(!trips.length){ listEl.innerHTML = '<div class="log-empty">No trips logged yet.</div>'; return; }
   const totalMiles = trips.reduce((s,m)=>s+(parseFloat(m.miles)||0),0);
@@ -1912,9 +1946,9 @@ function renderMileageList(){
     <div class="log-entry">
       <span class="le-date">${(m.date||'').slice(5)}</span>
       <span class="le-note"><strong>${escapeAttr(m.purpose || 'Trip')}</strong></span>
-      <span class="le-amt expense">${(parseFloat(m.miles)||0).toLocaleString()} mi</span>
+      <span class="le-amt expense">${(parseFloat(m.miles)||0).toLocaleString()} ${unit}</span>
       <button class="le-del" data-id="${m.id}" title="Remove">×</button>
-    </div>`).join('') + `<div style="margin-top:10px;font-size:12px;color:var(--ink-soft);">Total: ${totalMiles.toLocaleString()} mi across ${trips.length} trip${trips.length===1?'':'s'}</div>`;
+    </div>`).join('') + `<div style="margin-top:10px;font-size:12px;color:var(--ink-soft);">Total: ${totalMiles.toLocaleString()} ${unit} across ${trips.length} trip${trips.length===1?'':'s'}</div>`;
   listEl.querySelectorAll('.le-del').forEach(btn=>{
     btn.addEventListener('click', ()=> deleteMileageEntry(btn.dataset.id));
   });
@@ -1949,11 +1983,12 @@ function exportMileageReport(){
   const rangeLabel = `${from || trips[0].date} to ${to || trips[trips.length-1].date}`;
   doc.text(`Period: ${rangeLabel}`, 40, 110);
 
+  const unit = mileageUnitLabel();
   doc.autoTable({
     startY: 130, margin:{left:40,right:40},
-    head:[['Date','Purpose','Miles'].concat(rate ? ['Amount'] : [])],
+    head:[['Date','Purpose',unit==='mi'?'Miles':'Kilometers'].concat(rate ? ['Amount'] : [])],
     body: trips.map(m => [m.date, m.purpose||'—', (parseFloat(m.miles)||0).toLocaleString()].concat(rate ? [fmt((parseFloat(m.miles)||0)*rate)] : [])),
-    foot:[['','Total', totalMiles.toLocaleString()].concat(rate ? [fmt(totalAmount)] : [])],
+    foot:[['','Total', totalMiles.toLocaleString()+' '+unit].concat(rate ? [fmt(totalAmount)] : [])],
     theme:'grid',
     headStyles:{fillColor:PDF_COLORS.ink, textColor:PDF_COLORS.white, fontStyle:'bold', fontSize:9},
     footStyles:{fillColor:PDF_COLORS.goodSoft, textColor:PDF_COLORS.ink, fontStyle:'bold', fontSize:9},
@@ -2214,6 +2249,21 @@ function cancelEntryEdit(){
   updateEditModeUI();
 }
 
+// Same tolerance as statement matching (date +/-3 days, amount +/-2 cents), applied
+// entry-to-entry this time — catches the reverse case: scanning/logging a receipt for
+// something that's already in state.log, whether that entry came from a manual add, a
+// scan, or an earlier statement reconciliation. excludeId keeps an in-progress edit from
+// flagging itself as a duplicate of itself.
+function findLikelyDuplicateEntry(candidateDate, candidateTotal, candidateBucket, excludeId){
+  if(candidateBucket === 'Income') return null;
+  return state.log.find(e => {
+    if(e.id === excludeId || e.bucket === 'Income' || !e.date) return false;
+    const dayDiff = Math.abs((new Date(candidateDate) - new Date(e.date)) / 86400000);
+    if(dayDiff > 3) return false;
+    return Math.abs(entryTotal(e) - candidateTotal) <= 0.02;
+  });
+}
+
 function addLogEntry(){
   const date = document.getElementById('logDate').value || todayISO();
   const bucket = document.getElementById('logBucket').value;
@@ -2239,6 +2289,11 @@ function addLogEntry(){
     updateEditModeUI();
     showToast('Updated.');
   } else {
+    const dupe = findLikelyDuplicateEntry(date, total, bucket, editingEntryId);
+    if(dupe){
+      const dupeLabel = `${dupe.merchant || dupe.note || 'an entry'} on ${dupe.date} for ${fmt(entryTotal(dupe))}`;
+      if(!confirm(`This looks like it might already be logged — ${dupeLabel}. Add this one anyway?`)) return;
+    }
     state.log.push({ id: 'l'+Date.now()+Math.random().toString(36).slice(2,7), ...fields });
     showToast('Logged.');
   }
