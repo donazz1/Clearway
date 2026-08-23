@@ -481,7 +481,7 @@
             <div id="statementResults" style="display:none;margin-top:14px;">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
                 <strong style="font-size:13px;" id="statementSummary"></strong>
-                <button class="btn" id="statementAddAllBtn" style="padding:6px 12px;font-size:12px;">Add all</button>
+                <button class="btn" id="statementAddAllBtn" style="padding:6px 12px;font-size:12px;">Add checked</button>
               </div>
               <div id="statementUnmatchedList"></div>
             </div>
@@ -1839,42 +1839,74 @@ async function handleStatementFile(file){
   }
 }
 
+// The guessed category is shown and editable right in the row, never applied silently
+// — this is the same "you check it before it saves" principle the receipt scanner
+// already follows. Nothing commits to state.log until the user acts on a row.
 function renderStatementUnmatched(){
   const list = document.getElementById('statementUnmatchedList');
-  list.innerHTML = statementUnmatched.map((tx, i) => `
+  list.innerHTML = statementUnmatched.map((tx, i) => {
+    if(!tx.guessedBucket) tx.guessedBucket = guessBucket(tx.description.toLowerCase()) || state.catOrder[0];
+    const options = state.catOrder.map(c =>
+      `<option value="${escapeAttr(c)}" ${c===tx.guessedBucket?'selected':''}>${escapeAttr(c)}</option>`).join('');
+    return `
     <div class="log-entry" style="cursor:default;">
+      <input type="checkbox" class="stmt-check" data-idx="${i}" checked style="flex-shrink:0;">
       <span class="le-date">${tx.date.slice(5)}</span>
       <span class="le-note"><strong>${escapeAttr(tx.description)}</strong></span>
+      <select class="stmt-bucket" data-idx="${i}" style="padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--paper);font-size:12px;flex-shrink:0;">${options}</select>
       <span class="le-amt expense">${fmt(tx.amount)}</span>
-      <button class="btn primary" style="padding:4px 10px;font-size:12px;" data-add-tx="${i}">Add</button>
-    </div>`).join('');
+      <button class="btn primary" style="padding:4px 10px;font-size:12px;flex-shrink:0;" data-add-tx="${i}">Add</button>
+    </div>`;
+  }).join('');
   list.querySelectorAll('[data-add-tx]').forEach(btn =>
     btn.addEventListener('click', () => addStatementTransaction(parseInt(btn.dataset.addTx, 10))));
 }
 
-function addStatementTransaction(index){
-  const tx = statementUnmatched[index];
-  if(!tx) return;
-  const bucket = guessBucket(tx.description.toLowerCase()) || state.catOrder[0];
+function updateStatementSummaryCount(){
+  const el = document.getElementById('statementSummary');
+  if(el) el.textContent = el.textContent.replace(/\d+ not yet\./, `${statementUnmatched.length} not yet.`);
+  if(!statementUnmatched.length) document.getElementById('statementResults').style.display = 'none';
+}
+
+function pushStatementEntry(tx, bucket){
   state.log.push({
     id: 'l'+Date.now()+Math.random().toString(36).slice(2,7),
     date: tx.date, bucket, amount: tx.amount, tax: null, taxes: [], tip: null,
     total: tx.amount, merchant: tx.description, note: 'From statement'
   });
+}
+
+function addStatementTransaction(index){
+  const tx = statementUnmatched[index];
+  if(!tx) return;
+  const selectEl = document.querySelector(`.stmt-bucket[data-idx="${index}"]`);
+  const bucket = (selectEl && selectEl.value) || tx.guessedBucket || state.catOrder[0];
+  pushStatementEntry(tx, bucket);
   statementUnmatched.splice(index, 1);
   saveLocal();
   renderLogList();
   renderStatementUnmatched();
-  document.getElementById('statementSummary').textContent =
-    document.getElementById('statementSummary').textContent.replace(/\d+ not yet\./, `${statementUnmatched.length} not yet.`);
-  if(!statementUnmatched.length) document.getElementById('statementResults').style.display = 'none';
+  updateStatementSummaryCount();
   showToast(`Added "${tx.description}".`);
 }
 
 function addAllStatementTransactions(){
-  const count = statementUnmatched.length;
-  while(statementUnmatched.length) addStatementTransaction(0);
-  if(count) showToast(`Added ${count} entries from the statement.`);
+  const checkedIdx = [...document.querySelectorAll('.stmt-check:checked')].map(el => parseInt(el.dataset.idx, 10));
+  if(!checkedIdx.length){ showToast('Nothing checked to add.'); return; }
+  // Resolve each row's tx + chosen bucket by reference before mutating the array —
+  // indexes shift once entries start being removed, object identity doesn't.
+  const toAdd = checkedIdx.map(i => {
+    const tx = statementUnmatched[i];
+    const selectEl = document.querySelector(`.stmt-bucket[data-idx="${i}"]`);
+    return { tx, bucket: (selectEl && selectEl.value) || tx.guessedBucket || state.catOrder[0] };
+  });
+  toAdd.forEach(({tx, bucket}) => pushStatementEntry(tx, bucket));
+  statementUnmatched = statementUnmatched.filter(tx => !toAdd.some(t => t.tx === tx));
+  saveLocal();
+  renderLogList();
+  renderStatementUnmatched();
+  updateStatementSummaryCount();
+  showToast(`Added ${toAdd.length} entr${toAdd.length===1?'y':'ies'} from the statement.`);
 }
 
 document.getElementById('statementInput').addEventListener('change', (e)=>{
