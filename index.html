@@ -161,15 +161,22 @@
   @media(max-width:600px){.log-form{grid-template-columns:1fr 1fr;}}
   .log-form input, .log-form select{width:100%;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--paper);font-size:14px;color:var(--ink);}
   .log-form input:focus, .log-form select:focus{outline:1px solid var(--focus);}
+  /* Date and Bucket are a nested flex row (not direct grid children) specifically so Date
+     can have a small fixed width and Bucket can take all the room that's left — a long
+     category name ("Food & Groceries") needs far more space than "Aug 20, 2026" does, and
+     forcing them to equal 50/50 columns made Bucket too narrow to be usable. */
+  .date-bucket-row{display:flex;gap:12px;}
   /* iOS renders <input type=date> with its own internal chrome that ignores ordinary
-     height/padding — this is the fix for that specifically, at max practical specificity
-     since two prior attempts via the generic .log-form rule above did not win. */
-  #logDate, #logBucket{
+     width/height — this pins it down at max practical specificity, since prior attempts
+     via the generic .log-form rule above did not win against Safari's native control. */
+  #logDate{
+    height:42px !important; min-height:42px !important; max-height:42px !important;
+    box-sizing:border-box !important; width:132px !important; min-width:132px !important; max-width:132px !important;
+    padding:0 8px !important; font-size:14px !important; line-height:40px !important;
+  }
+  #logBucket{
     height:42px !important; min-height:42px !important; max-height:42px !important;
     box-sizing:border-box !important; width:100% !important; min-width:0 !important;
-    max-width:calc(50% - 6px) !important; /* hard ceiling — Safari's native date-input
-      chrome doesn't reliably respect width:100% inside a grid track, but max-width still
-      clips it rather than letting it grow into the neighboring field regardless */
     padding:0 8px !important; font-size:14px !important; line-height:40px !important;
   }
   .log-form input#logTotal{background:var(--good-soft);font-weight:700;color:var(--good);}
@@ -455,10 +462,12 @@
               <button type="button" class="tax-add-btn" style="margin-top:6px;color:var(--bad);" onclick="removeLogPhoto()">Remove photo</button>
             </div>
             <div class="log-form">
-              <div class="field-labeled"><label>Date</label><input type="date" id="logDate"></div>
-              <div class="field-labeled">
-                <label>Bucket</label>
-                <select id="logBucket"></select>
+              <div class="date-bucket-row" style="grid-column:1 / -1;">
+                <div class="field-labeled" style="flex:0 0 132px;"><label>Date</label><input type="date" id="logDate"></div>
+                <div class="field-labeled" style="flex:1;min-width:0;">
+                  <label>Bucket</label>
+                  <select id="logBucket"></select>
+                </div>
               </div>
               <div class="field-labeled" style="grid-column:1 / -1;"><label>Merchant</label><input type="text" id="logMerchant" placeholder="e.g. Shell, Sobeys"></div>
               <div class="field-labeled"><label>Amount</label><input type="text" id="logAmount" placeholder="0" oninput="updateLogTotal()"></div>
@@ -1788,6 +1797,29 @@ function findMatchingCategory(canonicalName){
   return state.catOrder.find(c => c.toLowerCase().includes(needle)) || null;
 }
 
+// Veryfi has its own general-purpose category taxonomy (confirmed live: "Meals &
+// Entertainment" for a restaurant receipt) — translate the ones with an obvious personal-
+// budget equivalent to Clearway's canonical concepts, then run through the same
+// findMatchingCategory() so a renamed category still matches.
+const VERYFI_CATEGORY_MAP = {
+  'Meals & Entertainment': 'Dining Out',
+  'Grocery': 'Food & Groceries',
+  'Groceries': 'Food & Groceries',
+  'Automotive': 'Transportation',
+  'Travel': 'Transportation',
+  'Fuel': 'Transportation',
+  'Parking': 'Transportation',
+  'Utilities': 'Utilities',
+  'Insurance': 'Insurance',
+  'Rent & Lease': 'Housing',
+  'Dues & Subscriptions': 'Subscriptions'
+};
+function guessBucketFromVeryfiCategory(veryfiCategory){
+  if(!veryfiCategory) return null;
+  const canonical = VERYFI_CATEGORY_MAP[veryfiCategory];
+  return canonical ? findMatchingCategory(canonical) : null;
+}
+
 function guessBucket(lower){
   const isPharmacy = PHARMACY_SIGNALS.some(k=>lower.includes(k));
   if(isPharmacy){
@@ -1860,9 +1892,11 @@ async function handleReceiptFile(file){
       clearTimeout(progressTimer);
     }
 
-    // Veryfi doesn't know Clearway's categories — keep guessing the bucket locally,
-    // same keyword logic as before, just fed by the merchant name Veryfi extracted.
-    const bucket = guessBucket(((parsed.merchant||'') + ' ' + (parsed.rawText||'')).toLowerCase());
+    // Prefer Veryfi's own category (its taxonomy, not Clearway's — translated above) since
+    // it's a real classification of the whole receipt, not a keyword guess off the merchant
+    // name alone. Fall back to the local text-keyword guess when it's missing or unmapped.
+    const bucket = guessBucketFromVeryfiCategory(parsed.category)
+      || guessBucket(((parsed.merchant||'') + ' ' + (parsed.rawText||'')).toLowerCase());
 
     if(parsed.amount) document.getElementById('logAmount').value = parsed.amount.toFixed(2);
     if(parsed.taxes && parsed.taxes.length){

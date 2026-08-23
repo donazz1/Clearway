@@ -45,22 +45,51 @@ exports.scanReceipt = onCall(
     const data = await res.json();
     logger.info('Veryfi response', { keys: Object.keys(data), data });
 
-    // Defensive field lookups — Veryfi's exact response shape wasn't fully confirmable
-    // from public docs alone, so this checks a few plausible field names per value
-    // rather than trusting one. First real scan against a live receipt should confirm
-    // (or correct) these against request.data.debug below.
-    const taxes = Array.isArray(data.tax_lines) && data.tax_lines.length
+    const ocrText = data.ocr_text || '';
+
+    // Confirmed against a real receipt: Veryfi's own structured `total` can be wrong on
+    // receipts where subtotal/tax/total are laid out unusually (it returned the subtotal
+    // as the total). The OCR text itself still usually has the real final charge on a
+    // "total paid" / "amount paid" line — prefer that when it's there.
+    function extractAmountFromText(text) {
+      const patterns = [
+        /total\s*paid[:\s]*\$?\s*([\d,]+\.\d{2})/i,
+        /amount\s*paid[:\s]*\$?\s*([\d,]+\.\d{2})/i,
+        /amount\s*charged[:\s]*\$?\s*([\d,]+\.\d{2})/i
+      ];
+      for (const p of patterns) {
+        const m = text.match(p);
+        if (m) return parseFloat(m[1].replace(/,/g, ''));
+      }
+      return null;
+    }
+    const structuredAmount = typeof data.total === 'number' ? data.total : null;
+    const amount = extractAmountFromText(ocrText) ?? structuredAmount;
+
+    // Tax: prefer Veryfi's own structured tax lines. When those come back empty (it
+    // happens — confirmed on a real receipt where the tax lines were unparsed even
+    // though the total and subtotal were both present), the difference between the
+    // amount above and the subtotal is the real tax, even when Veryfi couldn't isolate
+    // the individual line itself.
+    let taxes = Array.isArray(data.tax_lines) && data.tax_lines.length
       ? data.tax_lines.map(t => ({ label: t.name || t.code || 'Tax', amount: Number(t.total ?? t.amount ?? 0) }))
-      : (typeof data.tax === 'number' && data.tax ? [{ label: 'Tax', amount: data.tax }] : []);
+      : [];
+    if (!taxes.length && typeof data.tax === 'number' && data.tax > 0) {
+      taxes = [{ label: 'Tax', amount: data.tax }];
+    }
+    if (!taxes.length && typeof data.subtotal === 'number' && typeof amount === 'number') {
+      const implied = Math.round((amount - data.subtotal) * 100) / 100;
+      if (implied > 0.01) taxes = [{ label: 'Tax', amount: implied }];
+    }
 
     return {
-      amount: typeof data.total === 'number' ? data.total : null,
+      amount,
       taxes,
       tip: typeof data.tip === 'number' ? data.tip : null,
       merchant: (data.vendor && data.vendor.name) || data.vendor_name || data.raw_vendor_name || '',
       date: (data.date || '').slice(0, 10) || null,
-      rawText: data.ocr_text || '',
-      _raw: data // kept temporarily so the first live test can confirm field names are right
+      category: data.category || null, // Veryfi's own taxonomy, e.g. "Meals & Entertainment" — mapped client-side
+      rawText: ocrText
     };
   }
 );
