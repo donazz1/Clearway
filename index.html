@@ -182,8 +182,17 @@
   .log-form input#logTotal{background:var(--good-soft);font-weight:700;color:var(--good);}
   .tax-rows{display:flex;flex-direction:column;gap:8px;margin-bottom:8px;}
   .tax-row{display:flex;gap:8px;align-items:center;}
-  .tax-row input.tax-label{width:80px;flex-shrink:0;min-width:0;padding:10px 10px;border:1px solid var(--line);border-radius:9px;background:var(--paper);font-size:14px;color:var(--ink);}
-  .tax-row input.tax-amount{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--paper);font-size:14px;color:var(--ink);}
+  /* Confirmed via direct measurement: the generic .log-form input width rule was winning
+     over this despite lower specificity on paper — !important removes the ambiguity,
+     same fix pattern that actually worked for the Date/Bucket row earlier tonight. */
+  .tax-row input.tax-label{
+    flex:0 0 80px !important; width:80px !important; min-width:0 !important;
+    padding:10px 10px;border:1px solid var(--line);border-radius:9px;background:var(--paper);font-size:14px;color:var(--ink);
+  }
+  .tax-row input.tax-amount{
+    flex:1 1 0 !important; min-width:0 !important;
+    padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--paper);font-size:14px;color:var(--ink);
+  }
   .tax-row input:focus{outline:1px solid var(--focus);}
   .tax-row .tax-remove{background:none;border:none;color:var(--ink-soft);cursor:pointer;font-size:17px;padding:4px 6px;flex-shrink:0;}
   .tax-row .tax-remove:hover{color:var(--bad);}
