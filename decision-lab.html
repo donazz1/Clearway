@@ -142,8 +142,11 @@
 
   <!-- CURRENT VS NEW -->
   <div class="section">
-    <h2>What it costs you each month</h2>
-    <div class="desc">Fill in your current vehicle and the one you're considering. This is the money side only — the rest comes below.</div>
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+      <h2 style="margin:0;">What it costs you each month</h2>
+      <button id="clearVehicleFieldsBtn" style="flex-shrink:0;padding:7px 12px;border-radius:8px;border:1px solid var(--bad);background:var(--bad-soft);color:var(--bad);font-size:12px;font-weight:600;cursor:pointer;">Clear all fields</button>
+    </div>
+    <div class="desc">Fill in your current vehicle and the one you're considering. This is the money side only — the rest comes below. Every field saves automatically as you type — nothing to click to save it.</div>
     <div class="grid2">
       <div>
         <div class="col-head" id="curLabel">Current vehicle</div>
@@ -815,6 +818,16 @@ function init(){
   renderFieldGroup(document.getElementById('newFields'), NEW_FIELDS, state.newv);
   renderFactors();
   renderRideshareFields();
+
+  document.getElementById('clearVehicleFieldsBtn').addEventListener('click', ()=>{
+    if(!confirm('Clear every current-vehicle and new-vehicle field? This can\'t be undone.')) return;
+    const fresh = defaultState();
+    state.current = fresh.current;
+    state.newv = fresh.newv;
+    renderFieldGroup(document.getElementById('curFields'), CUR_FIELDS, state.current);
+    renderFieldGroup(document.getElementById('newFields'), NEW_FIELDS, state.newv);
+    save(); compute();
+  });
 
   document.getElementById('rsToggle').checked = !!state.rideshare.enabled;
   document.getElementById('rsBody').classList.toggle('show', !!state.rideshare.enabled);
