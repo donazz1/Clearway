@@ -146,11 +146,13 @@
     <div class="desc">Fill in your current vehicle and the one you're considering. This is the money side only — the rest comes below.</div>
     <div class="grid2">
       <div>
-        <div class="col-head" id="curLabel">Current vehicle</div>
+        <div class="col-head">Current vehicle</div>
+        <input type="text" id="curVehicleNameInput" placeholder="e.g. 2021 Tesla Model 3" style="width:100%;border:none;background:var(--paper);font-family:var(--serif);font-size:15px;font-weight:600;padding:8px 10px;border-radius:8px;margin-bottom:10px;box-sizing:border-box;">
         <div id="curFields"></div>
       </div>
       <div>
-        <div class="col-head ev" id="newLabel">New vehicle</div>
+        <div class="col-head ev">New vehicle</div>
+        <input type="text" id="newVehicleNameInput" placeholder="e.g. 2026 Tesla Model Y" style="width:100%;border:none;background:var(--electric-soft);font-family:var(--serif);font-size:15px;font-weight:600;color:var(--electric);padding:8px 10px;border-radius:8px;margin-bottom:10px;box-sizing:border-box;">
         <div id="newFields"></div>
       </div>
     </div>
@@ -785,8 +787,11 @@ function insertLoanPaymentRow(){
   const row = document.createElement('div');
   row.id = 'loanPaymentLine';
   row.className = 'field';
-  row.style.cssText = 'background:var(--electric-soft);margin:4px -8px;padding:8px;border-radius:8px;border-bottom:none;';
-  row.innerHTML = `<label style="font-weight:600;">Estimated loan payment</label><strong class="loan-line-val" style="font-family:var(--mono);">$0/mo</strong>`;
+  // Matches the width/padding/font of every other .field row exactly (no horizontal
+  // margin or padding of its own) so it lines up in the same column as the inputs
+  // above and below it — only the background/weight differ, not the alignment.
+  row.style.cssText = 'background:var(--electric-soft);border-radius:8px;border-bottom:none;';
+  row.innerHTML = `<label style="font-weight:600;color:var(--ink);">Estimated loan payment</label><strong class="loan-line-val" style="width:100px;display:inline-block;font-family:var(--mono);font-size:13px;font-weight:700;text-align:right;padding:6px 8px;box-sizing:border-box;">$0/mo</strong>`;
   rows[3].insertAdjacentElement('afterend', row);
 }
 
@@ -845,6 +850,21 @@ function init(){
   insertLoanPaymentRow();
   renderFactors();
   renderRideshareFields();
+
+  // Make/model/year for each vehicle — feeds state.curLabel/newLabel, which the
+  // scorecard ("side" labels) and the final verdict text already read live.
+  const curNameEl = document.getElementById('curVehicleNameInput');
+  const newNameEl = document.getElementById('newVehicleNameInput');
+  curNameEl.value = state.curLabel === 'Current car' ? '' : (state.curLabel || '');
+  newNameEl.value = state.newLabel === 'New car' ? '' : (state.newLabel || '');
+  curNameEl.addEventListener('input', e=>{
+    state.curLabel = e.target.value.trim() || 'Current car';
+    save(); renderFactors(); compute();
+  });
+  newNameEl.addEventListener('input', e=>{
+    state.newLabel = e.target.value.trim() || 'New car';
+    save(); renderFactors(); compute();
+  });
 
   document.getElementById('saveVehicleFieldsBtn').addEventListener('click', ()=>{
     save();
