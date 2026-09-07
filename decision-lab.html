@@ -142,11 +142,8 @@
 
   <!-- CURRENT VS NEW -->
   <div class="section">
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-      <h2 style="margin:0;">What it costs you each month</h2>
-      <button id="clearVehicleFieldsBtn" style="flex-shrink:0;padding:7px 12px;border-radius:8px;border:1px solid var(--bad);background:var(--bad-soft);color:var(--bad);font-size:12px;font-weight:600;cursor:pointer;">Clear all fields</button>
-    </div>
-    <div class="desc">Fill in your current vehicle and the one you're considering. This is the money side only — the rest comes below. Every field saves automatically as you type — nothing to click to save it.</div>
+    <h2 style="margin:0;">What it costs you each month</h2>
+    <div class="desc">Fill in your current vehicle and the one you're considering. This is the money side only — the rest comes below.</div>
     <div class="grid2">
       <div>
         <div class="col-head" id="curLabel">Current vehicle</div>
@@ -155,6 +152,7 @@
       <div>
         <div class="col-head ev" id="newLabel">New vehicle</div>
         <div id="newFields"></div>
+        <div class="proj-summary" id="loanPaymentLine" style="margin-top:8px;"></div>
       </div>
     </div>
     <div class="delta-banner">
@@ -164,6 +162,13 @@
       </div>
       <div style="font-size:12px;color:var(--ink-soft);max-width:260px;">
         Includes financing on the new vehicle after putting your current vehicle's sale value toward it.
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid var(--line);">
+      <div style="font-size:11px;color:var(--ink-soft);" id="saveStatusLine">Saves automatically as you type.</div>
+      <div style="display:flex;gap:14px;align-items:center;">
+        <button id="saveVehicleFieldsBtn" style="background:none;border:none;color:var(--good);font-size:12px;font-weight:600;cursor:pointer;padding:4px;">Save</button>
+        <button id="clearVehicleFieldsBtn" style="background:none;border:none;color:var(--ink-soft);font-size:12px;cursor:pointer;padding:4px;text-decoration:underline;">Clear all fields</button>
       </div>
     </div>
   </div>
@@ -775,6 +780,13 @@ function compute(){
   deltaEl.textContent = (costData.delta<=0?'':'+') + fmt(costData.delta) + '/mo';
   deltaEl.className = 'val ' + (costData.delta<=0?'good':costData.delta<150?'warn':'bad');
 
+  const loanLineEl = document.getElementById('loanPaymentLine');
+  if(loanLineEl){
+    loanLineEl.textContent = costData.pmt > 0
+      ? `Estimated loan payment: ${fmt(costData.pmt)}/mo (price minus sale value and cash down, financed at the rate/term above).`
+      : '';
+  }
+
   const rsData = computeRideshare();
   const bigNumEl = document.getElementById('rsBigNumber');
   const captionEl = document.getElementById('rsBigCaption');
@@ -818,6 +830,14 @@ function init(){
   renderFieldGroup(document.getElementById('newFields'), NEW_FIELDS, state.newv);
   renderFactors();
   renderRideshareFields();
+
+  document.getElementById('saveVehicleFieldsBtn').addEventListener('click', ()=>{
+    save();
+    const statusEl = document.getElementById('saveStatusLine');
+    statusEl.textContent = 'Saved.';
+    clearTimeout(window.__saveStatusTimer);
+    window.__saveStatusTimer = setTimeout(()=>{ statusEl.textContent = 'Saves automatically as you type.'; }, 2000);
+  });
 
   document.getElementById('clearVehicleFieldsBtn').addEventListener('click', ()=>{
     if(!confirm('Clear every current-vehicle and new-vehicle field? This can\'t be undone.')) return;
