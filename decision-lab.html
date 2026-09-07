@@ -263,6 +263,42 @@
 
 </div>
 
+<script type="module">
+  // Same Firebase project/account Clearway's main app (index.html) already uses — this
+  // page just wasn't wired to it before. Reuses whatever sign-in session already exists
+  // in this browser (no separate login here); if nobody's signed in, this page keeps
+  // working exactly as before, local-only.
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js";
+  import {
+    initializeFirestore, persistentLocalCache, persistentSingleTabManager,
+    doc, setDoc, onSnapshot
+  } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
+  import {
+    getAuth, onAuthStateChanged, setPersistence, indexedDBLocalPersistence, browserLocalPersistence
+  } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-auth.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyC4YOzm--iwvpZJOn8ocFX2rGFaGvQu7cQ",
+    authDomain: "carbook-1c258.firebaseapp.com",
+    projectId: "carbook-1c258",
+    storageBucket: "carbook-1c258.firebasestorage.app",
+    messagingSenderId: "128980994740",
+    appId: "1:128980994740:web:8489c2cfd9050b9b7325e1"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  setPersistence(auth, indexedDBLocalPersistence).catch(()=>{
+    setPersistence(auth, browserLocalPersistence).catch(()=>{});
+  });
+  const firestore = initializeFirestore(app, {
+    localCache: persistentLocalCache({ tabManager: persistentSingleTabManager() })
+  });
+
+  window.fb = { auth, firestore, onAuthStateChanged, doc, setDoc, onSnapshot };
+  window.dispatchEvent(new Event('fb-ready'));
+</script>
+
 <script>
 /* ---------- State ---------- */
 const STORAGE_KEY = 'clearway-decision-lab-v1';
@@ -312,20 +348,114 @@ function migrateRideshare(base, raw){
   return out;
 }
 
+// Shared by both load paths (localStorage on boot, a Firestore snapshot from another
+// device) so remote data gets the exact same defaulting/migration treatment as local —
+// a doc written by an older version of this page shouldn't silently drop new fields.
+function hydrateState(parsed){
+  const base = defaultState();
+  const defaultRideshare = base.rideshare; // captured before Object.assign below overwrites base.rideshare with the (possibly old-schema) saved one
+  const merged = Object.assign(base, parsed || {});
+  merged.rideshare = migrateRideshare(defaultRideshare, (parsed||{}).rideshare);
+  return merged;
+}
 function load(){
   try{
     const raw = localStorage.getItem(STORAGE_KEY);
     if(!raw) return defaultState();
-    const parsed = JSON.parse(raw);
-    const base = defaultState();
-    const defaultRideshare = base.rideshare; // captured before Object.assign below overwrites base.rideshare with the (possibly old-schema) saved one
-    const merged = Object.assign(base, parsed);
-    merged.rideshare = migrateRideshare(defaultRideshare, parsed.rideshare);
-    return merged;
+    return hydrateState(JSON.parse(raw));
   }catch(e){ return defaultState(); }
 }
 let state = load();
-function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+function save(){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  if(!applyingRemote) pushToCloud(false);
+}
+
+/* ---------- Cloud sync ----------
+   Same account/database Clearway's main app already uses — this page just wasn't
+   wired to it before. localStorage stays the always-on working copy (fast, works
+   offline); when signed in, it's also mirrored to its own Firestore document
+   (clearway_users/{uid}/decisionLab/main — kept separate from the main budget doc)
+   and a live listener applies changes made from any other signed-in device. If
+   nobody's signed in, this page behaves exactly as it always has, local-only. */
+let cloudUser = null;
+let cloudDocRef = null;
+let cloudUnsub = null;
+let applyingRemote = false;
+let pushTimer = null;
+
+function pushToCloud(immediate){
+  if(!cloudUser || !cloudDocRef || applyingRemote) return;
+  clearTimeout(pushTimer);
+  const write = ()=> fb.setDoc(cloudDocRef, state).catch(err=>console.error('Decision-lab cloud sync failed:', err));
+  if(immediate) write(); else pushTimer = setTimeout(write, 800);
+}
+
+// Tells a genuine change (from another device) apart from the server-confirmed echo
+// of this device's own write — same pattern as the main app's sync.
+function deepEqual(a, b){
+  if(a === b) return true;
+  if(typeof a !== typeof b || a===null || b===null || typeof a !== 'object') return false;
+  const keysA = Object.keys(a), keysB = Object.keys(b);
+  if(keysA.length !== keysB.length) return false;
+  return keysA.every(k => deepEqual(a[k], b[k]));
+}
+
+function applyRemoteState(data){
+  applyingRemote = true;
+  state = hydrateState(data);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); // refresh local mirror only — no cloud push
+  applyingRemote = false;
+  refreshAllUI();
+}
+
+// Rebuilds every rendered field/value from the current `state` — renderFieldGroup(),
+// renderFactors(), and renderRideshareFields() all wipe and rebuild their containers
+// with fresh listeners already, so this is safe to call repeatedly, not just at boot.
+function refreshAllUI(){
+  renderFieldGroup(document.getElementById('curFields'), CUR_FIELDS, state.current);
+  renderFieldGroup(document.getElementById('newFields'), NEW_FIELDS, state.newv);
+  insertLoanPaymentRow();
+  renderFactors();
+  renderRideshareFields();
+  document.getElementById('curVehicleNameInput').value = state.curLabel === 'Current car' ? '' : (state.curLabel || '');
+  document.getElementById('newVehicleNameInput').value = state.newLabel === 'New car' ? '' : (state.newLabel || '');
+  document.getElementById('rsToggle').checked = !!state.rideshare.enabled;
+  document.getElementById('rsBody').classList.toggle('show', !!state.rideshare.enabled);
+  compute();
+}
+
+function subscribeCloud(){
+  cloudDocRef = fb.doc(fb.firestore, 'clearway_users', cloudUser.uid, 'decisionLab', 'main');
+  let first = true;
+  cloudUnsub = fb.onSnapshot(cloudDocRef, snap=>{
+    if(snap.metadata.hasPendingWrites) return; // echo of our own write, pending phase
+    if(first){
+      first = false;
+      if(!snap.exists()){ pushToCloud(true); return; } // brand-new on this account — seed the cloud doc from this device's current (local) state
+    }
+    if(!snap.exists()) return;
+    if(deepEqual(hydrateState(snap.data()), state)) return; // server-confirmed echo of our own write — nothing actually changed
+    applyRemoteState(snap.data());
+  }, err=>{ console.error('Decision-lab cloud listener error:', err); });
+}
+
+function unsubscribeCloud(){
+  if(cloudUnsub){ cloudUnsub(); cloudUnsub = null; }
+  cloudDocRef = null;
+}
+
+function handleAuthChange(user){
+  cloudUser = user;
+  unsubscribeCloud();
+  if(!user) return; // no account signed in here — keep working local-only, no UI change
+  subscribeCloud();
+}
+
+function initCloudAuth(){
+  fb.onAuthStateChanged(fb.auth, handleAuthChange);
+}
+if(window.fb) initCloudAuth(); else window.addEventListener('fb-ready', initCloudAuth, {once:true});
 function fmt(n){ const v=Math.round(n||0); const s=v<0?'-':''; return s+'$'+Math.abs(v).toLocaleString(); }
 
 /* ---------- Cost fields ---------- */
