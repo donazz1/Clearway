@@ -147,12 +147,12 @@
     <div class="grid2">
       <div>
         <div class="col-head">Current vehicle</div>
-        <input type="text" id="curVehicleNameInput" placeholder="e.g. 2021 Tesla Model 3" style="width:100%;border:none;background:var(--paper);font-family:var(--serif);font-size:15px;font-weight:600;padding:8px 10px;border-radius:8px;margin-bottom:10px;box-sizing:border-box;">
+        <input type="text" id="curVehicleNameInput" placeholder="Year, make, model" style="width:100%;border:1px solid var(--line);background:var(--paper);font-family:var(--sans);font-size:14px;padding:8px 10px;border-radius:8px;margin-bottom:10px;box-sizing:border-box;">
         <div id="curFields"></div>
       </div>
       <div>
         <div class="col-head ev">New vehicle</div>
-        <input type="text" id="newVehicleNameInput" placeholder="e.g. 2026 Tesla Model Y" style="width:100%;border:none;background:var(--electric-soft);font-family:var(--serif);font-size:15px;font-weight:600;color:var(--electric);padding:8px 10px;border-radius:8px;margin-bottom:10px;box-sizing:border-box;">
+        <input type="text" id="newVehicleNameInput" placeholder="Year, make, model" style="width:100%;border:1px solid var(--electric);background:var(--electric-soft);font-family:var(--sans);font-size:14px;padding:8px 10px;border-radius:8px;margin-bottom:10px;box-sizing:border-box;">
         <div id="newFields"></div>
       </div>
     </div>
@@ -790,8 +790,13 @@ function insertLoanPaymentRow(){
   // Matches the width/padding/font of every other .field row exactly (no horizontal
   // margin or padding of its own) so it lines up in the same column as the inputs
   // above and below it — only the background/weight differ, not the alignment.
+  // Mirrors the real structure of every other row exactly — label, then a value box
+  // the same width/padding/font as an <input>, then a fixed-width unit span — because
+  // that fixed-width unit span (44px) is what keeps every value box's left edge lined
+  // up regardless of label length. A two-part row (no unit span) collapses to the far
+  // right instead of that shared position.
   row.style.cssText = 'background:var(--electric-soft);border-radius:8px;border-bottom:none;';
-  row.innerHTML = `<label style="font-weight:600;color:var(--ink);">Estimated loan payment</label><strong class="loan-line-val" style="width:100px;display:inline-block;font-family:var(--mono);font-size:13px;font-weight:700;text-align:right;padding:6px 8px;box-sizing:border-box;">$0/mo</strong>`;
+  row.innerHTML = `<label style="font-weight:600;color:var(--ink);">Estimated loan payment</label><strong class="loan-line-val" style="width:100px;display:inline-block;font-family:var(--mono);font-size:13px;font-weight:700;text-align:right;padding:6px 8px;box-sizing:border-box;">$0</strong><span class="unit">/mo</span>`;
   rows[3].insertAdjacentElement('afterend', row);
 }
 
@@ -803,7 +808,7 @@ function compute(){
 
   const loanLineEl = document.getElementById('loanPaymentLine');
   if(loanLineEl){
-    loanLineEl.querySelector('.loan-line-val').textContent = costData.pmt > 0 ? fmt(costData.pmt)+'/mo' : '—';
+    loanLineEl.querySelector('.loan-line-val').textContent = costData.pmt > 0 ? fmt(costData.pmt) : '—';
   }
 
   const rsData = computeRideshare();
