@@ -152,7 +152,6 @@
       <div>
         <div class="col-head ev" id="newLabel">New vehicle</div>
         <div id="newFields"></div>
-        <div class="proj-summary" id="loanPaymentLine" style="margin-top:8px;"></div>
       </div>
     </div>
     <div class="delta-banner">
@@ -774,6 +773,23 @@ function renderResaleWarning(rsData){
   el.textContent = `Heads up: at this pace you'd add roughly ${Math.round(kmPerYear).toLocaleString()} extra km/year. Tesla resale has held up unusually well in general (Model Y retains ~64% of value over 3 years, in the range of a Honda CR-V or Toyota RAV4) — this isn't a gas-engine wear-out story, batteries typically outlast the car. But heavy fast-charging and deep-cycling (charging to 100%, running near-empty — common when maximizing uptime) is a documented factor in battery health and resale, separate from raw mileage. Worth tracking your own car's actual resale value over time rather than assuming a steep drop — or assuming none at all.`;
 }
 
+// Placed as a real row directly under "Loan term" — the field it's computed from —
+// not as a caption tucked away below the whole form. renderFieldGroup() wipes and
+// rebuilds #newFields from scratch each time it runs, so this has to be re-inserted
+// after every one of those calls, not just once at page load.
+function insertLoanPaymentRow(){
+  const container = document.getElementById('newFields');
+  if(!container) return;
+  const rows = container.querySelectorAll('.field');
+  if(rows.length < 4) return; // price, down, rate, term — insert right after the 4th
+  const row = document.createElement('div');
+  row.id = 'loanPaymentLine';
+  row.className = 'field';
+  row.style.cssText = 'background:var(--electric-soft);margin:4px -8px;padding:8px;border-radius:8px;border-bottom:none;';
+  row.innerHTML = `<label style="font-weight:600;">Estimated loan payment</label><strong class="loan-line-val" style="font-family:var(--mono);">$0/mo</strong>`;
+  rows[3].insertAdjacentElement('afterend', row);
+}
+
 function compute(){
   const costData = computeMonthly();
   const deltaEl = document.getElementById('deltaVal');
@@ -782,9 +798,7 @@ function compute(){
 
   const loanLineEl = document.getElementById('loanPaymentLine');
   if(loanLineEl){
-    loanLineEl.textContent = costData.pmt > 0
-      ? `Estimated loan payment: ${fmt(costData.pmt)}/mo (price minus sale value and cash down, financed at the rate/term above).`
-      : '';
+    loanLineEl.querySelector('.loan-line-val').textContent = costData.pmt > 0 ? fmt(costData.pmt)+'/mo' : '—';
   }
 
   const rsData = computeRideshare();
@@ -828,6 +842,7 @@ function compute(){
 function init(){
   renderFieldGroup(document.getElementById('curFields'), CUR_FIELDS, state.current);
   renderFieldGroup(document.getElementById('newFields'), NEW_FIELDS, state.newv);
+  insertLoanPaymentRow();
   renderFactors();
   renderRideshareFields();
 
@@ -846,6 +861,7 @@ function init(){
     state.newv = fresh.newv;
     renderFieldGroup(document.getElementById('curFields'), CUR_FIELDS, state.current);
     renderFieldGroup(document.getElementById('newFields'), NEW_FIELDS, state.newv);
+    insertLoanPaymentRow();
     save(); compute();
   });
 
