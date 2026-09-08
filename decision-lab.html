@@ -385,9 +385,17 @@ let applyingRemote = false;
 let pushTimer = null;
 
 function pushToCloud(immediate){
-  if(!cloudUser || !cloudDocRef || applyingRemote) return;
+  if(!cloudUser || !cloudDocRef || applyingRemote){
+    console.log('[DecisionLab Sync] pushToCloud skipped —', {hasCloudUser:!!cloudUser, hasCloudDocRef:!!cloudDocRef, applyingRemote});
+    return;
+  }
   clearTimeout(pushTimer);
-  const write = ()=> fb.setDoc(cloudDocRef, state).catch(err=>console.error('Decision-lab cloud sync failed:', err));
+  const write = ()=> {
+    console.log('[DecisionLab Sync] writing to', cloudDocRef.path || cloudDocRef);
+    fb.setDoc(cloudDocRef, state)
+      .then(()=> console.log('[DecisionLab Sync] write succeeded'))
+      .catch(err=>console.error('[DecisionLab Sync] write FAILED:', err.code, err.message, err));
+  };
   if(immediate) write(); else pushTimer = setTimeout(write, 800);
 }
 
@@ -427,17 +435,20 @@ function refreshAllUI(){
 
 function subscribeCloud(){
   cloudDocRef = fb.doc(fb.firestore, 'clearway_users', cloudUser.uid, 'decisionLab', 'main');
+  console.log('[DecisionLab Sync] subscribing at', cloudDocRef.path || cloudDocRef);
   let first = true;
   cloudUnsub = fb.onSnapshot(cloudDocRef, snap=>{
+    console.log('[DecisionLab Sync] snapshot received —', {exists: snap.exists(), hasPendingWrites: snap.metadata.hasPendingWrites, first});
     if(snap.metadata.hasPendingWrites) return; // echo of our own write, pending phase
     if(first){
       first = false;
-      if(!snap.exists()){ pushToCloud(true); return; } // brand-new on this account — seed the cloud doc from this device's current (local) state
+      if(!snap.exists()){ console.log('[DecisionLab Sync] no cloud doc yet — seeding from local state'); pushToCloud(true); return; }
     }
     if(!snap.exists()) return;
-    if(deepEqual(hydrateState(snap.data()), state)) return; // server-confirmed echo of our own write — nothing actually changed
+    if(deepEqual(hydrateState(snap.data()), state)){ console.log('[DecisionLab Sync] snapshot matches current state — no UI change needed'); return; }
+    console.log('[DecisionLab Sync] applying remote state to this device');
     applyRemoteState(snap.data());
-  }, err=>{ console.error('Decision-lab cloud listener error:', err); });
+  }, err=>{ console.error('[DecisionLab Sync] listener error:', err.code, err.message, err); });
 }
 
 function unsubscribeCloud(){
@@ -446,6 +457,7 @@ function unsubscribeCloud(){
 }
 
 function handleAuthChange(user){
+  console.log('[DecisionLab Sync] auth state changed —', user ? ('signed in as '+user.uid) : 'signed out / no user');
   cloudUser = user;
   unsubscribeCloud();
   if(!user) return; // no account signed in here — keep working local-only, no UI change
@@ -453,8 +465,10 @@ function handleAuthChange(user){
 }
 
 function initCloudAuth(){
+  console.log('[DecisionLab Sync] initCloudAuth() called, window.fb present:', !!window.fb);
   fb.onAuthStateChanged(fb.auth, handleAuthChange);
 }
+console.log('[DecisionLab Sync] boot check, window.fb present:', !!window.fb);
 if(window.fb) initCloudAuth(); else window.addEventListener('fb-ready', initCloudAuth, {once:true});
 function fmt(n){ const v=Math.round(n||0); const s=v<0?'-':''; return s+'$'+Math.abs(v).toLocaleString(); }
 
