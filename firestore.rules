@@ -1,10 +1,46 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Stable CarBook collections
+    match /bookings/{id} {
+      allow read, write: if true;
+    }
+    match /devices/{id} {
+      allow read, write: if true;
+    }
+    match /members/{id} {
+      allow read, write: if true;
+    }
+
+    // CarBook Beta collections
+    match /beta_bookings/{id} {
+      allow read, write: if true;
+    }
+    match /beta_devices/{id} {
+      allow read, write: if true;
+    }
+    match /beta_members/{id} {
+      allow read, write: if true;
+    }
+    match /beta_bookingRequests/{id} {
+      allow read, write: if true;
+    }
+    match /beta_notifications/{id} {
+      allow read, write: if true;
+    }
+    match /beta_notificationSettings/{id} {
+      allow read, write: if true;
+    }
+
     // Clearway's data — isolated under its own collection since this Firebase
     // project (carbook-1c258 / "CarBook") is shared with the CarBook app.
-    // Add this match block into CarBook's existing rules rather than replacing them.
     match /clearway_users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+    // Covers subcollections under a user's doc (e.g. decisionLab/main for "The Big
+    // Decision") — the rule above only matches the exact top-level document, it does
+    // not cascade to anything nested beneath it in Firestore's security model.
+    match /clearway_users/{uid}/{subcollection=**} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
   }
